@@ -12,7 +12,7 @@ var token = Environment.GetEnvironmentVariable("RELAY_TOKEN") ?? throw new Inval
 if (token.Length < 32) throw new InvalidOperationException("RELAY_TOKEN precisa ter no mínimo 32 caracteres");
 var certPath = Environment.GetEnvironmentVariable("RELAY_CERT_PATH") ?? throw new InvalidOperationException("RELAY_CERT_PATH obrigatório");
 var certPassword = Environment.GetEnvironmentVariable("RELAY_CERT_PASSWORD") ?? "";
-using var cert = X509CertificateLoader.LoadPkcs12FromFile(certPath, certPassword);
+using var cert = new X509Certificate2(certPath, certPassword, X509KeyStorageFlags.EphemeralKeySet);
 var waiting = new ConcurrentDictionary<string, HostEntry>();
 var listener = new TcpListener(IPAddress.Any, port);
 listener.Start();
