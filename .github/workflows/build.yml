@@ -1,0 +1,42 @@
+name: Build RemotePortable Windows x64
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Build portable EXE with bundled FFmpeg
+        shell: pwsh
+        run: ./build.ps1
+
+      - name: Verify output
+        shell: pwsh
+        run: |
+          if (!(Test-Path 'publish/RemotePortable.exe')) {
+            throw 'RemotePortable.exe nao foi gerado'
+          }
+          Get-Item 'publish/RemotePortable.exe' | Select-Object Name,Length
+
+      - name: Upload executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: RemotePortable-win-x64
+          path: publish/RemotePortable.exe
+          if-no-files-found: error
+          retention-days: 30
