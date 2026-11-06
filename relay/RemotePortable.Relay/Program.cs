@@ -55,7 +55,7 @@ while (true)
                         await entry.Paired.Task.WaitAsync(waitTimeout.Token);
                         await RelayPairAsync(entry.Stream, entry.Peer!);
                     }
-                    finally { waiting.TryRemove(new KeyValuePair<string, HostEntry>(id, entry)); }
+                    finally { entry.Done.TrySetResult(); waiting.TryRemove(new KeyValuePair<string, HostEntry>(id, entry)); }
                 }
                 else if (fields[0] == "JOIN")
                 {
