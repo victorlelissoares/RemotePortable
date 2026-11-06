@@ -1,0 +1,29 @@
+name: Relay build
+on:
+  push:
+    paths:
+      - 'relay/**'
+      - '.github/workflows/relay.yml'
+  pull_request:
+    paths:
+      - 'relay/**'
+      - '.github/workflows/relay.yml'
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Build relay
+        run: dotnet build relay/RemotePortable.Relay/RemotePortable.Relay.csproj -c Release
+      - name: Build tunnel
+        run: dotnet build relay/RemotePortable.Tunnel/RemotePortable.Tunnel.csproj -c Release
+      - name: Publish Windows tunnel
+        run: dotnet publish relay/RemotePortable.Tunnel/RemotePortable.Tunnel.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o relay/publish-tunnel
+      - uses: actions/upload-artifact@v4
+        with:
+          name: RemotePortable-Tunnel-win-x64
+          path: relay/publish-tunnel/RemotePortable.Tunnel.exe
