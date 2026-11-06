@@ -1,0 +1,14 @@
+services:
+  relay:
+    build: ./RemotePortable.Relay
+    restart: unless-stopped
+    ports:
+      - "47900:47900"
+    environment:
+      RELAY_PORT: "47900"
+      RELAY_TOKEN: "${RELAY_TOKEN:?Configure RELAY_TOKEN no arquivo .env}"
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    cap_drop:
+      - ALL
