@@ -28,7 +28,7 @@ async Task<SslStream> ConnectRelay(CancellationToken ct)
     var ssl = new SslStream(tcp.GetStream(), false);
     try
     {
-        await ssl.AuthenticateAsClientAsync(relayHost, ct);
+        await ssl.AuthenticateAsClientAsync(new SslClientAuthenticationOptions { TargetHost = relayHost }, ct);
         await RelayClientAuth.AuthenticateAsync(ssl, identity, mode == "host" ? "HOST" : "JOIN", targetId, ct);
         var answer = await RelayClientAuth.ReadLineAsync(ssl, ct);
         if (answer.StartsWith("ERR")) throw new IOException("Relay: " + answer);
@@ -65,7 +65,7 @@ if (mode == "host")
                 using var tcp = new TcpClient();
                 await tcp.ConnectAsync(relayHost, relayPort, shutdown.Token);
                 using var tls = new SslStream(tcp.GetStream(), false);
-                await tls.AuthenticateAsClientAsync(relayHost, shutdown.Token);
+                await tls.AuthenticateAsClientAsync(new SslClientAuthenticationOptions { TargetHost = relayHost }, shutdown.Token);
                 await RelayClientAuth.AuthenticateAsync(tls, identity, "REGISTER", identity.Id, shutdown.Token);
                 await RelayClientAuth.WriteLineAsync(tls, $"{name} {platform} {hostFingerprint}", shutdown.Token);
                 if (await RelayClientAuth.ReadLineAsync(tls, shutdown.Token) != "OK") throw new IOException("Registro recusado pelo Relay.");
