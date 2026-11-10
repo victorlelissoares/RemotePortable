@@ -15,6 +15,7 @@ on:
 
 permissions:
   contents: read
+  packages: write
 
 jobs:
   linux:
@@ -45,3 +46,18 @@ jobs:
         with:
           name: RemotePortable-Tunnel-Linux-x64
           path: RemotePortable-Tunnel-Linux-x64.tar.gz
+
+      - name: Setup ORAS
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        uses: oras-project/setup-oras@v1
+
+      - name: Publish Linux package to GHCR
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$GH_TOKEN" | oras login ghcr.io -u "${{ github.actor }}" --password-stdin
+          package="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/remoteportable-linux"
+          oras push "$package:sha-${GITHUB_SHA}" "RemotePortable-Linux-x64.tar.gz:application/gzip" --artifact-type "application/vnd.remoteportable.desktop.v1"
+          oras tag "$package:sha-${GITHUB_SHA}" latest
