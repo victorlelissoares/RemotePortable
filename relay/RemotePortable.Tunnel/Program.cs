@@ -80,6 +80,36 @@ using var shutdown = new CancellationTokenSource();
 Console.CancelKeyPress += (_, e) => { e.Cancel = true; shutdown.Cancel(); };
 if (mode == "host")
 {
+    // Automatic global discovery: every host tunnel announces itself.
+    // No fingerprint is published until the GUI can supply its host certificate.
+    _ = Task.Run(async () =>
+    {
+        var name = new string(Environment.MachineName.Where(ch => char.IsAsciiLetterOrDigit(ch) || ch is '-' or '_' or '.').Take(64).ToArray());
+        if (name.Length == 0) name = "RemotePortable";
+        var platform = OperatingSystem.IsWindows() ? "Windows" : OperatingSystem.IsLinux() ? "Linux" : "Other";
+        while (!shutdown.IsCancellationRequested)
+        {
+            try
+            {
+                using var tcp = new TcpClient();
+                await tcp.ConnectAsync(relayHost, relayPort, shutdown.Token);
+                using var tls = new SslStream(tcp.GetStream(), false);
+                await tls.AuthenticateAsClientAsync(relayHost);
+                await tls.WriteAsync(Encoding.ASCII.GetBytes($"REGISTER {token} {id}\n{name} {platform} {new string('0', 64)}\n"), shutdown.Token);
+                if (await ReadLineAsync(tls, shutdown.Token) != "OK") throw new IOException("Registro automático recusado.");
+                Console.WriteLine($"Disponível na lista global: {name} ({id})");
+                while (!shutdown.IsCancellationRequested)
+                {
+                    await Task.Delay(15000, shutdown.Token);
+                    await tls.WriteAsync(Encoding.ASCII.GetBytes("PING\n"), shutdown.Token);
+                    if (await ReadLineAsync(tls, shutdown.Token) != "PONG") throw new IOException("Heartbeat perdido.");
+                }
+            }
+            catch (OperationCanceledException) when (shutdown.IsCancellationRequested) { break; }
+            catch (Exception ex) { Console.Error.WriteLine("Descoberta: " + ex.Message); }
+            try { await Task.Delay(3000, shutdown.Token); } catch (OperationCanceledException) { break; }
+        }
+    });
     Console.WriteLine($"HOST: compartilhamento RemotePortable deve estar ativo em 127.0.0.1:{localPort}");
     while (!shutdown.IsCancellationRequested)
     {
