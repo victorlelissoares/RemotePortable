@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: read
+  packages: write
 
 jobs:
   build:
@@ -37,6 +38,33 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: RemotePortable-win-x64
-          path: publish/RemotePortable.exe
+          path: |
+            publish/RemotePortable.exe
+            publish/RemotePortable.Tunnel.exe
           if-no-files-found: error
           retention-days: 30
+
+      - name: Package Windows application
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        shell: pwsh
+        run: |
+          if (!(Test-Path 'publish/RemotePortable.Tunnel.exe')) { throw 'Tunnel ausente' }
+          Compress-Archive -Path 'publish/RemotePortable.exe','publish/RemotePortable.Tunnel.exe' -DestinationPath 'RemotePortable-Windows-x64.zip' -Force
+
+      - name: Setup ORAS
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        uses: oras-project/setup-oras@v1
+
+      - name: Publish Windows package to GHCR
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $env:GH_TOKEN | oras login ghcr.io -u "${{ github.actor }}" --password-stdin
+          if ($LASTEXITCODE -ne 0) { throw 'GHCR login failed' }
+          $package = "ghcr.io/${{ github.repository_owner }}/remoteportable-windows".ToLowerInvariant()
+          oras push "$($package):sha-${{ github.sha }}" "RemotePortable-Windows-x64.zip:application/zip" --artifact-type "application/vnd.remoteportable.desktop.v1"
+          if ($LASTEXITCODE -ne 0) { throw 'GHCR publish failed' }
+          oras tag "$($package):sha-${{ github.sha }}" latest
+          if ($LASTEXITCODE -ne 0) { throw 'GHCR latest tag failed' }
