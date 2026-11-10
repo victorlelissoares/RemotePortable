@@ -126,7 +126,15 @@ internal sealed class MainWindow : Window
                 choice.Device.Id, relayToken.Text ?? "", 47891);
             address.Text = "127.0.0.1";
             port.Value = 47891;
-            if (choice.Device.Fingerprint.Any(ch => ch != '0')) fingerprint.Text = choice.Device.Fingerprint;
+            if (choice.Device.Fingerprint.Length != 64 || choice.Device.Fingerprint.All(ch => ch == '0'))
+                throw new InvalidOperationException("Host ainda não publicou fingerprint TLS válido.");
+            fingerprint.Text = choice.Device.Fingerprint;
+            if (string.IsNullOrWhiteSpace(password.Text))
+            {
+                status.Text = "Informe a senha do host antes de conectar.";
+                managedTunnel?.Dispose(); managedTunnel = null;
+                return;
+            }
             await Task.Delay(350);
             await Start(false);
         }
@@ -141,7 +149,20 @@ internal sealed class MainWindow : Window
         current.Status += message => Dispatcher.UIThread.Post(() =>
         {
             status.Text = message;
-            if (message.StartsWith("Fingerprint SHA-256: ")) fingerprint.Text = message["Fingerprint SHA-256: ".Length..];
+            if (message.StartsWith("Fingerprint SHA-256: "))
+            {
+                fingerprint.Text = message["Fingerprint SHA-256: ".Length..];
+                if (useRelay.IsChecked == true)
+                {
+                    try
+                    {
+                        managedTunnel?.Dispose();
+                        managedTunnel = new RelayTunnelProcess("host", relayHost.Text?.Trim() ?? "", 47900,
+                            deviceId.Text?.Trim() ?? "", relayToken.Text ?? "", (int)(port.Value ?? 47890), fingerprint.Text);
+                    }
+                    catch (Exception ex) { status.Text = "Relay: " + ex.Message; }
+                }
+            }
         });
         current.Approve = peer =>
         {
@@ -173,13 +194,6 @@ internal sealed class MainWindow : Window
         };
         try
         {
-            if (isHost && useRelay.IsChecked == true)
-            {
-                if (string.IsNullOrWhiteSpace(relayToken.Text)) throw new ArgumentException("Informe o token do Relay.");
-                managedTunnel?.Dispose();
-                managedTunnel = new RelayTunnelProcess("host", relayHost.Text?.Trim() ?? "", 47900,
-                    deviceId.Text?.Trim() ?? "", relayToken.Text, (int)(port.Value ?? 47890));
-            }
             if (isHost)
                 await Task.Run(() => current.HostAsync((int)(port.Value ?? 47890), password.Text ?? "", (int)(fps.Value ?? 20), allowInput.IsChecked == true));
             else
