@@ -54,6 +54,20 @@ internal sealed class RelayTunnelProcess : IDisposable
         if (mode == "host" && fingerprint != null) psi.ArgumentList.Add(fingerprint);
         process = Process.Start(psi) ?? throw new IOException("Não foi possível iniciar o Tunnel.");
     }
+    public static async Task WaitForLocalListenerAsync(int port, CancellationToken ct = default)
+    {
+        for (int attempt = 0; attempt < 40; attempt++)
+        {
+            using var client = new TcpClient();
+            try
+            {
+                await client.ConnectAsync("127.0.0.1", port, ct);
+                return;
+            }
+            catch (SocketException) { await Task.Delay(100, ct); }
+        }
+        throw new TimeoutException("O Tunnel não abriu a porta local a tempo.");
+    }
     public void Dispose()
     {
         try { if (!process.HasExited) process.Kill(entireProcessTree: true); } catch { }
