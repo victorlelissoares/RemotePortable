@@ -194,10 +194,18 @@ internal sealed class MainWindow : Window
         };
         try
         {
+            // Avalonia controls must only be accessed on the UI thread.
+            // Capture immutable values before dispatching network work to Task.Run.
+            var selectedPort = (int)(port.Value ?? 47890);
+            var selectedPassword = password.Text ?? "";
+            var selectedFps = (int)(fps.Value ?? 20);
+            var selectedInput = allowInput.IsChecked == true;
+            var selectedAddress = address.Text?.Trim() ?? "";
+            var selectedFingerprint = fingerprint.Text ?? "";
             if (isHost)
-                await Task.Run(() => current.HostAsync((int)(port.Value ?? 47890), password.Text ?? "", (int)(fps.Value ?? 20), allowInput.IsChecked == true));
+                await Task.Run(() => current.HostAsync(selectedPort, selectedPassword, selectedFps, selectedInput));
             else
-                await Task.Run(() => current.ConnectAsync(address.Text?.Trim() ?? "", (int)(port.Value ?? 47890), password.Text ?? "", fingerprint.Text ?? ""));
+                await Task.Run(() => current.ConnectAsync(selectedAddress, selectedPort, selectedPassword, selectedFingerprint));
         }
         catch (Exception ex) { status.Text = "Erro: " + ex.Message; }
         finally
