@@ -15,9 +15,10 @@ var targetId = args[3].ToLowerInvariant();
 var localPort = args.Length > 4 ? int.Parse(args[4]) : (mode == "host" ? 47890 : 47891);
 var hostFingerprint = mode == "host" && args.Length > 5 ? args[5].Trim().ToUpperInvariant() : new string('0', 64);
 if (hostFingerprint.Length != 64 || !hostFingerprint.All(Uri.IsHexDigit)) throw new ArgumentException("Fingerprint inválido");
-if (targetId.Length != 64 || !targetId.All(Uri.IsHexDigit)) throw new ArgumentException("ID de dispositivo inválido");
+if (targetId.Length is < 6 or > 64 || !targetId.All(c => char.IsAsciiLetterOrDigit(c) || c == '-'))
+    throw new ArgumentException("ID de dispositivo inválido");
 var identity = DeviceIdentity.LoadOrCreate();
-if (mode == "host" && !StringComparer.OrdinalIgnoreCase.Equals(targetId, identity.Id))
+if (mode == "host" && (!targetId.All(Uri.IsHexDigit) || !StringComparer.OrdinalIgnoreCase.Equals(targetId, identity.Id)))
     throw new ArgumentException("O host deve publicar o ID derivado da identidade local.");
 
 async Task<SslStream> ConnectRelay(CancellationToken ct)
