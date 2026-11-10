@@ -13,6 +13,7 @@ using System.Security.Cryptography.X509Certificates;
 using System.Net.Security;
 using System.Text;
 using System.Windows.Forms;
+using RemotePortable.Shared;
 
 namespace RemotePortable;
 
@@ -34,6 +35,15 @@ internal sealed class MainForm : Form
     readonly NumericUpDown fps = new() { Minimum = 5, Maximum = 60, Value = 30, Width = 60 };
     readonly CheckBox allowInput = new() { Text = "Permitir mouse e teclado", Checked = true, AutoSize = true };
     readonly PictureBox screen = new() { Dock = DockStyle.Fill, SizeMode = PictureBoxSizeMode.Zoom, BackColor = Color.FromArgb(28, 31, 38), TabStop = true };
+    readonly TextBox relayHost = new() { Text = "remoteportable.cloud", Width = 170 };
+    readonly TextBox relayToken = new() { Width = 180, UseSystemPasswordChar = true, PlaceholderText = "Token do Relay" };
+    readonly TextBox deviceId = new() { Text = "win-" + Environment.MachineName.ToLowerInvariant().Replace("_", "-"), Width = 155 };
+    readonly ListBox devices = new() { Width = 320, Height = 120, Dock = DockStyle.Fill };
+    readonly Button refresh = new() { Text = "Atualizar", AutoSize = true };
+    readonly Button quickConnect = new() { Text = "Conectar selecionado", AutoSize = true };
+    readonly CheckBox useRelay = new() { Text = "Usar Relay", Checked = true, AutoSize = true };
+    readonly System.Windows.Forms.Timer discoveryTimer = new() { Interval = 10000 };
+    RelayTunnelProcess? managedTunnel;
     CancellationTokenSource? session;
     TcpListener? listener;
     TcpClient? active;
@@ -62,13 +72,25 @@ internal sealed class MainForm : Form
             hostButton, connectButton, stopButton, allowInput,
             new Label { Text = "FPS:", AutoSize = true, Margin = new Padding(8, 8, 3, 3) }, fps,
             new Label { Text = "Fingerprint TLS:", AutoSize = true, Margin = new Padding(8, 8, 3, 3) }, fingerprint });
+        top.Controls.AddRange(new Control[] { new Label { Text = "Relay:", AutoSize = true }, relayHost,
+            new Label { Text = "Token:", AutoSize = true }, relayToken,
+            new Label { Text = "Meu ID:", AutoSize = true }, deviceId, useRelay });
+        var directory = new Panel { Dock = DockStyle.Left, Width = 330, Padding = new Padding(8) };
+        var directoryActions = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 40 };
+        directoryActions.Controls.AddRange(new Control[] { refresh, quickConnect });
+        directory.Controls.Add(devices); directory.Controls.Add(directoryActions);
+        refresh.Click += async (_, _) => await RefreshDevices();
+        quickConnect.Click += async (_, _) => await ConnectSelected();
+        devices.DoubleClick += async (_, _) => await ConnectSelected();
+        discoveryTimer.Tick += async (_, _) => { if (!string.IsNullOrWhiteSpace(relayToken.Text)) await RefreshDevices(); };
+        discoveryTimer.Start();
         var bottom = new Panel { Dock = DockStyle.Bottom, Height = 56, Padding = new Padding(12) };
         status.Dock = DockStyle.Fill; bottom.Controls.Add(status);
-        Controls.Add(screen); Controls.Add(bottom); Controls.Add(top);
+        Controls.Add(screen); Controls.Add(directory); Controls.Add(bottom); Controls.Add(top);
         hostButton.Click += async (_, _) => await StartHost();
         connectButton.Click += async (_, _) => await StartClient();
         stopButton.Click += (_, _) => Stop();
-        FormClosing += (_, _) => Stop();
+        FormClosing += (_, _) => { discoveryTimer.Stop(); Stop(); };
         screen.MouseMove += (_, e) => SendMouse(0, e.Location);
         screen.MouseDown += (_, e) => { screen.Focus(); SendMouse(e.Button == MouseButtons.Left ? 1 : 3, e.Location); };
         screen.MouseUp += (_, e) => SendMouse(e.Button == MouseButtons.Left ? 2 : 4, e.Location);
@@ -77,12 +99,43 @@ internal sealed class MainForm : Form
         screen.KeyUp += (_, e) => { SendInputMessage($"K|0|{(int)e.KeyCode}"); e.Handled = true; e.SuppressKeyPress = true; };
     }
 
+    sealed record DeviceChoice(OnlineDevice Device)
+    {
+        public override string ToString() => $"{Device.Name} ({Device.Platform}) — {Device.Id}";
+    }
+    async Task RefreshDevices()
+    {
+        if (string.IsNullOrWhiteSpace(relayToken.Text)) return;
+        try
+        {
+            var list = await RelayDirectory.ListAsync(relayHost.Text.Trim(), 47900, relayToken.Text);
+            devices.Items.Clear();
+            foreach (var device in list) devices.Items.Add(new DeviceChoice(device));
+        }
+        catch (Exception ex) { status.Text = "Descoberta: " + ex.Message; }
+    }
+    async Task ConnectSelected()
+    {
+        if (devices.SelectedItem is not DeviceChoice choice || session is { IsCancellationRequested: false }) return;
+        try
+        {
+            managedTunnel?.Dispose();
+            managedTunnel = new RelayTunnelProcess("join", relayHost.Text.Trim(), 47900, choice.Device.Id, relayToken.Text, 47891);
+            ip.Text = "127.0.0.1";
+            port.Value = 47891;
+            if (choice.Device.Fingerprint.Any(ch => ch != '0')) fingerprint.Text = choice.Device.Fingerprint;
+            await Task.Delay(350);
+            await StartClient();
+        }
+        catch (Exception ex) { status.Text = "Conexão: " + ex.Message; managedTunnel?.Dispose(); managedTunnel = null; }
+    }
     void SetStatus(string s) { Log(s); OnUi(() => status.Text = s); }
     void Busy(bool b) { hostButton.Enabled = connectButton.Enabled = !b; stopButton.Enabled = b; }
     void Stop()
     {
         Log($"Stop solicitado. Thread={Environment.CurrentManagedThreadId}; origem={Environment.StackTrace}");
         stopping = true;
+        managedTunnel?.Dispose(); managedTunnel = null;
         Interlocked.Increment(ref hostGeneration);
         session?.Cancel();
         try { connection?.Dispose(); } catch { }
@@ -106,6 +159,16 @@ internal sealed class MainForm : Form
         // O servidor executa fora da thread WinForms: leitura TLS e espera por clientes são bloqueantes.
         int generation = Interlocked.Increment(ref hostGeneration);
         Log($"Iniciando compartilhamento, geração {generation}, porta {hostPort}.");
+        try
+        {
+            if (useRelay.Checked)
+            {
+                if (string.IsNullOrWhiteSpace(relayToken.Text)) throw new ArgumentException("Informe o token do Relay.");
+                managedTunnel?.Dispose();
+                managedTunnel = new RelayTunnelProcess("host", relayHost.Text.Trim(), 47900, deviceId.Text.Trim(), relayToken.Text, hostPort);
+            }
+        }
+        catch (Exception ex) { Stop(); MessageBox.Show(ex.Message); return Task.CompletedTask; }
         _ = Task.Run(() => HostSupervisor(password, hostPort, hostFps, token, generation));
         return Task.CompletedTask;
     }
