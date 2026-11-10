@@ -1,0 +1,61 @@
+name: Publish downloads (GitHub Releases)
+
+on:
+  workflow_run:
+    workflows:
+      - Build RemotePortable Windows x64
+      - Linux Desktop and Tunnel
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: remoteportable-downloads
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == 'master' &&
+       github.event.workflow_run.head_repository.full_name == github.repository)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Download successful build artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          RUN_NAME: ${{ github.event.workflow_run.name }}
+        run: |
+          set -euo pipefail
+          mkdir -p downloads
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "Run the Windows/Linux build workflows; this workflow publishes their successful results."
+            exit 1
+          fi
+          if [[ "$RUN_NAME" == "Build RemotePortable Windows x64" ]]; then
+            gh run download "$RUN_ID" --repo "$REPO" --name RemotePortable-Windows-x64 --dir downloads
+          elif [[ "$RUN_NAME" == "Linux Desktop and Tunnel" ]]; then
+            gh run download "$RUN_ID" --repo "$REPO" --name RemotePortable-Linux-x64 --dir downloads
+          else
+            exit 1
+          fi
+          ls -lh downloads
+
+      - name: Create or update downloads release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          if ! gh release view downloads --repo "$REPO" >/dev/null 2>&1; then
+            gh release create downloads --repo "$REPO" --target master \
+              --title "RemotePortable — Downloads" \
+              --notes "Baixe a versão portátil para Windows ou Linux. Os arquivos são atualizados automaticamente após builds bem-sucedidos na branch master."
+          fi
+          gh release upload downloads downloads/* --repo "$REPO" --clobber
