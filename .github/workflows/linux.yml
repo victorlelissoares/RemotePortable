@@ -1,0 +1,45 @@
+name: Linux Desktop and Tunnel
+
+on:
+  push:
+    paths:
+      - 'linux/**'
+      - 'relay/RemotePortable.Tunnel/**'
+      - '.github/workflows/linux.yml'
+  pull_request:
+    paths:
+      - 'linux/**'
+      - 'relay/RemotePortable.Tunnel/**'
+      - '.github/workflows/linux.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Build Linux desktop
+        run: dotnet build linux/RemotePortable.Linux/RemotePortable.Linux.csproj -c Release
+      - name: Publish Linux desktop
+        run: dotnet publish linux/RemotePortable.Linux/RemotePortable.Linux.csproj -c Release -r linux-x64 --self-contained true -p:PublishSingleFile=false -o out/desktop
+      - name: Publish Linux tunnel
+        run: dotnet publish relay/RemotePortable.Tunnel/RemotePortable.Tunnel.csproj -c Release -r linux-x64 --self-contained true -p:PublishSingleFile=true -o out/tunnel
+      - name: Package artifacts
+        run: |
+          chmod +x out/desktop/RemotePortable.Linux out/tunnel/RemotePortable.Tunnel
+          tar -czf RemotePortable-Linux-x64.tar.gz -C out/desktop .
+          tar -czf RemotePortable-Tunnel-Linux-x64.tar.gz -C out/tunnel .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: RemotePortable-Linux-x64
+          path: RemotePortable-Linux-x64.tar.gz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: RemotePortable-Tunnel-Linux-x64
+          path: RemotePortable-Tunnel-Linux-x64.tar.gz
