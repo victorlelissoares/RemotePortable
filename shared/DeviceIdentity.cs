@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using System.Net.Security;
 using System.Text;
 using System.Text.Json;
 
@@ -61,7 +62,7 @@ internal static class RelayClientAuth
         using var tcp = new TcpClient();
         await tcp.ConnectAsync(relay, port, ct);
         using var tls = new SslStream(tcp.GetStream(), false);
-        await tls.AuthenticateAsClientAsync(relay, ct);
+        await tls.AuthenticateAsClientAsync(new SslClientAuthenticationOptions { TargetHost = relay }, ct);
         await WriteLineAsync(tls, $"ENROLL {identity.PublicKey}", ct);
         var response = await ReadLineAsync(tls, ct);
         if (response.StartsWith("PENDING ", StringComparison.Ordinal))
