@@ -8,6 +8,7 @@
     <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Remove="relay/**/*.cs" />
     <EmbeddedResource Include="ffmpeg.exe" LogicalName="RemotePortable.Binaries.ffmpeg.exe" />
   </ItemGroup>
 </Project>
