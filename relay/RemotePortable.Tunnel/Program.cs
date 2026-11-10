@@ -1,7 +1,39 @@
 using System.Net.Security;
 using System.Net.Sockets;
 using System.Text;
+using System.Text.Json;
 
+// Discovery commands use the same TLS endpoint and shared token as the Relay.
+if (args.Length == 4 && args[0] == "list")
+{
+    using var tcp = new TcpClient();
+    await tcp.ConnectAsync(args[1], int.Parse(args[2]));
+    using var tls = new SslStream(tcp.GetStream(), false);
+    await tls.AuthenticateAsClientAsync(args[1]);
+    await tls.WriteAsync(Encoding.ASCII.GetBytes($"LIST {args[3]} list-all\\n".Replace("\\\\n", "\\n")));
+    var response = await ReadLineAsync(tls, CancellationToken.None);
+    if (response.StartsWith("ERR")) throw new IOException(response);
+    using var doc = JsonDocument.Parse(response);
+    foreach (var device in doc.RootElement.EnumerateArray())
+        Console.WriteLine($"{device.GetProperty("id").GetString()} | {device.GetProperty("name").GetString()} | {device.GetProperty("platform").GetString()} | {device.GetProperty("fingerprint").GetString()}");
+    return;
+}
+if (args.Length == 7 && args[0] == "register")
+{
+    using var tcp = new TcpClient();
+    await tcp.ConnectAsync(args[1], int.Parse(args[2]));
+    using var tls = new SslStream(tcp.GetStream(), false);
+    await tls.AuthenticateAsClientAsync(args[1]);
+    await tls.WriteAsync(Encoding.ASCII.GetBytes($"REGISTER {args[4]} {args[3]}\\n{args[5]} {System.Runtime.InteropServices.RuntimeInformation.OSDescription.Split(' ')[0].Replace('-', '_')} {args[6]}\\n".Replace("\\\\n", "\\n")));
+    if (await ReadLineAsync(tls, CancellationToken.None) != "OK") throw new IOException("Registro recusado pelo Relay.");
+    Console.WriteLine("Dispositivo anunciado. Ctrl+C para sair.");
+    while (true)
+    {
+        await Task.Delay(15000);
+        await tls.WriteAsync(Encoding.ASCII.GetBytes("PING\\n".Replace("\\\\n", "\\n")));
+        if (await ReadLineAsync(tls, CancellationToken.None) != "PONG") throw new IOException("Heartbeat recusado.");
+    }
+}
 if (args.Length < 5 || (args[0] != "host" && args[0] != "join"))
 {
     Console.WriteLine("Uso: dotnet RemotePortable.Tunnel.dll host|join RELAY_DNS PORTA_RELAY ID TOKEN [PORTA_LOCAL]");
