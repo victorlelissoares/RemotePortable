@@ -16,8 +16,11 @@ var approvedPath = Path.Combine(dataPath, "approved-devices.json");
 var pendingPath = Path.Combine(dataPath, "pending-devices.json");
 var legacyToken = Environment.GetEnvironmentVariable("RELAY_LEGACY_TOKEN");
 Directory.CreateDirectory(dataPath);
-if (args.Length == 2 && args[0] is "approve" or "revoke")
+if (args.Length > 0 && (args[0] is "approve" or "revoke"))
 {
+    if (args.Length != 2)
+        throw new ArgumentException("Uso: relay approve <ID-do-dispositivo> ou relay revoke <ID-do-dispositivo>.");
+
     await using var dataLock = await AcquireDataLockAsync(CancellationToken.None);
     var target = args[1].ToLowerInvariant();
     if (!ValidDeviceId(target)) throw new ArgumentException("ID de dispositivo inválido.");
@@ -53,6 +56,10 @@ while (true)
     {
         using (tcp)
         {
+            var phase = "TLS handshake";
+            string? deviceId = null;
+            string? action = null;
+            var peer = tcp.Client.RemoteEndPoint?.ToString() ?? "unknown";
             try
             {
                 tcp.NoDelay = true;
@@ -63,9 +70,11 @@ while (true)
                     ServerCertificate = cert,
                     EnabledSslProtocols = SslProtocols.Tls12 | SslProtocols.Tls13
                 }, timeout.Token);
+                phase = "read request";
                 var line = await ReadLineAsync(tls, timeout.Token);
                 if (line.StartsWith("ENROLL ", StringComparison.Ordinal))
                 {
+                    phase = "ENROLL";
                     await EnrollAsync(tls, line[7..], timeout.Token);
                     return;
                 }
@@ -82,19 +91,22 @@ while (true)
                 {
                     await WriteLineAsync(tls, "ERR protocol"); return;
                 }
-                var deviceId = fields[1];
+                deviceId = fields[1];
+                action = fields[2];
                 var targetId = fields[3];
                 if (fields[2] == "LIST" ? targetId != "-" :
                     fields[2] == "JOIN" ? !ValidLegacyId(targetId) : !ValidDeviceId(targetId))
                 {
                     await WriteLineAsync(tls, "ERR target"); return;
                 }
+                phase = $"{action} approval lookup";
                 var approved = await LoadKeysAsync(approvedPath, timeout.Token);
                 if (!approved.TryGetValue(deviceId, out var publicKey))
                 {
                     await WriteLineAsync(tls, "ERR device-not-approved"); return;
                 }
                 var nonce = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
+                phase = $"{action} signature";
                 await WriteLineAsync(tls, "CHALLENGE " + nonce);
                 var signatureLine = await ReadLineAsync(tls, timeout.Token);
                 if (!signatureLine.StartsWith("SIGN ", StringComparison.Ordinal) ||
@@ -107,6 +119,8 @@ while (true)
                     await WriteLineAsync(tls, "ERR identity-mismatch"); return;
                 }
                 await WriteLineAsync(tls, "OK");
+                phase = $"{action} dispatch";
+                Console.WriteLine($"{DateTimeOffset.UtcNow:O} peer={peer} action={action} device={deviceId} authenticated");
 
                 if (fields[2] == "LIST")
                 {
@@ -116,6 +130,7 @@ while (true)
                 }
                 else if (fields[2] == "REGISTER")
                 {
+                    phase = "REGISTER metadata";
                     var owner = Guid.NewGuid().ToString("N");
                     var meta = (await ReadLineAsync(tls, timeout.Token)).Split(' ', 3);
                     if (meta.Length != 3 || !discovery.Register(deviceId, meta[0], meta[1], meta[2], owner))
@@ -123,6 +138,7 @@ while (true)
                         await WriteLineAsync(tls, "ERR register"); return;
                     }
                     await WriteLineAsync(tls, "OK");
+                    phase = "REGISTER heartbeat";
                     try
                     {
                         while (true)
@@ -136,28 +152,42 @@ while (true)
                 }
                 else if (fields[2] == "HOST")
                 {
+                    phase = "HOST pairing wait";
                     var entry = new HostEntry(tls);
                     if (!waiting.TryAdd(targetId, entry)) { await WriteLineAsync(tls, "ERR id-in-use"); return; }
                     try
                     {
+                        Console.WriteLine($"{DateTimeOffset.UtcNow:O} peer={peer} action=HOST device={deviceId} waiting");
                         await WriteLineAsync(tls, "WAIT");
                         using var waitTimeout = new CancellationTokenSource(TimeSpan.FromMinutes(30));
                         await entry.Paired.Task.WaitAsync(waitTimeout.Token);
+                        phase = "HOST relay pair";
                         await RelayPairAsync(entry.Stream, entry.Peer!);
                     }
                     finally { entry.Done.TrySetResult(); if (waiting.TryGetValue(targetId, out var current) && ReferenceEquals(current, entry)) waiting.TryRemove(targetId, out _); }
                 }
                 else if (fields[2] == "JOIN")
                 {
-                    if (!waiting.TryRemove(targetId, out var entry)) { await WriteLineAsync(tls, "ERR host-offline"); return; }
+                    phase = "JOIN host lookup";
+                    if (!waiting.TryRemove(targetId, out var entry))
+                    {
+                        Console.WriteLine($"{DateTimeOffset.UtcNow:O} peer={peer} action=JOIN device={deviceId} target={targetId} host-offline");
+                        await WriteLineAsync(tls, "ERR host-offline"); return;
+                    }
                     entry.Peer = tls;
+                    phase = "JOIN pairing";
                     await WriteLineAsync(entry.Stream, "READY");
                     await WriteLineAsync(tls, "READY");
                     entry.Paired.TrySetResult();
+                    Console.WriteLine($"{DateTimeOffset.UtcNow:O} peer={peer} action=JOIN device={deviceId} target={targetId} paired");
+                    phase = "JOIN relay pair";
                     await entry.Done.Task;
                 }
             }
-            catch (Exception ex) { Console.Error.WriteLine($"{DateTimeOffset.UtcNow:O} {ex.GetType().Name}: {ex.Message}"); }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"{DateTimeOffset.UtcNow:O} peer={peer} action={action ?? "unknown"} device={deviceId ?? "unknown"} phase={phase} {ex.GetType().Name}: {ex.Message}");
+            }
         }
     });
 }
