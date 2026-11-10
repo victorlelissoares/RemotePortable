@@ -6,8 +6,12 @@ services:
       - "47900:47900"
     environment:
       RELAY_PORT: "47900"
-      RELAY_CERT_PATH: "/certs/relay.pfx"\n      RELAY_CERT_PASSWORD: "\${RELAY_CERT_PASSWORD:?Configure RELAY_CERT_PASSWORD}"\n      RELAY_TOKEN: "${RELAY_TOKEN:?Configure RELAY_TOKEN no arquivo .env}"
-    volumes:\n      - ./certs/relay.pfx:/certs/relay.pfx:ro\n    security_opt:
+      RELAY_CERT_PATH: "/certs/relay.pfx"
+      RELAY_CERT_PASSWORD: "${RELAY_CERT_PASSWORD:?Configure RELAY_CERT_PASSWORD}"
+      RELAY_TOKEN: "${RELAY_TOKEN:?Configure RELAY_TOKEN no arquivo .env}"
+    volumes:
+      - ./certs/relay.pfx:/certs/relay.pfx:ro
+    security_opt:
       - no-new-privileges:true
     read_only: true
     cap_drop:
