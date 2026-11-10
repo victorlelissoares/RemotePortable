@@ -1,0 +1,78 @@
+name: Deploy Relay to Hostinger VPS
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'relay/**'
+      - '.github/workflows/deploy-relay.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: remoteportable-relay-production
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Build Relay
+        run: dotnet build relay/RemotePortable.Relay/RemotePortable.Relay.csproj -c Release
+      - name: Validate Docker Compose syntax
+        run: |
+          RELAY_TOKEN=validation-token RELAY_CERT_PASSWORD=validation-password docker compose -f relay/docker-compose.yml config --quiet
+
+  deploy:
+    needs: validate
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 15
+    steps:
+      - name: Configure SSH
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.VPS_SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.VPS_SSH_KNOWN_HOSTS }}
+        run: |
+          set -eu
+          test -n "$SSH_PRIVATE_KEY" || { echo "Missing VPS_SSH_PRIVATE_KEY"; exit 1; }
+          test -n "$SSH_KNOWN_HOSTS" || { echo "Missing VPS_SSH_KNOWN_HOSTS"; exit 1; }
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Deploy to VPS
+        run: |
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 -i ~/.ssh/id_ed25519 root@187.53.101.196 'bash -se' <<'REMOTE'
+          set -euo pipefail
+          cd /opt/RemotePortable
+          git fetch origin master
+          git reset --hard origin/master
+          cd relay
+          test -s .env || { echo "Missing relay/.env"; exit 1; }
+          test -s certs/relay.pfx || { echo "Missing relay/certs/relay.pfx"; exit 1; }
+          docker compose config --quiet
+          docker compose up -d --build --remove-orphans
+          container_id="$(docker compose ps -q relay)"
+          test -n "$container_id" || { echo "Relay container not found"; exit 1; }
+          for attempt in $(seq 1 10); do
+            sleep 3
+            status="$(docker inspect -f '{{.State.Status}}' "$container_id")"
+            if [ "$status" = "running" ]; then
+              echo "Relay container running"
+              docker compose ps
+              exit 0
+            fi
+          done
+          docker compose logs --tail=50 relay
+          echo "Relay failed to start"
+          exit 1
+          REMOTE
