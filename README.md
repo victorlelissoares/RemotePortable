@@ -23,15 +23,15 @@ Se o último comando falhar, sua combinação de FFmpeg, GPU e encoder não é c
 
 No Windows, dê dois cliques em **`compilar.cmd`** (ou execute `./build.ps1` no PowerShell). O script baixa, extrai, verifica e incorpora `ffmpeg.exe` automaticamente. Requer .NET SDK 8 e internet no computador usado para compilar.
 
-Depois da compilação, copie **somente `publish/RemotePortable.exe`** para cada computador. O FFmpeg é incorporado como recurso no executável. Na primeira execução que usar vídeo, ele é extraído automaticamente para `%LOCALAPPDATA%\RemotePortable\bin\<sha256>\ffmpeg.exe`. Isso **não instala** o FFmpeg no sistema, mas cria um arquivo temporário persistente no perfil do usuário, necessário para iniciar o processo de codificação/decodificação. O cache é verificado com SHA-256 e reutilizado em execuções posteriores. O `.exe` final será maior (possivelmente centenas de MB). Antivírus ou políticas corporativas podem bloquear a extração/execução.
+Depois da compilação, distribua o pacote gerado pelo workflow, que contém `RemotePortable.exe` e `RemotePortable.Tunnel.exe` na mesma pasta. O FFmpeg é incorporado como recurso no executável. Na primeira execução que usar vídeo, ele é extraído automaticamente para `%LOCALAPPDATA%\RemotePortable\bin\<sha256>\ffmpeg.exe`. Isso **não instala** o FFmpeg no sistema, mas cria um arquivo temporário persistente no perfil do usuário, necessário para iniciar o processo de codificação/decodificação. O cache é verificado com SHA-256 e reutilizado em execuções posteriores. O `.exe` final será maior (possivelmente centenas de MB). Antivírus ou políticas corporativas podem bloquear a extração/execução.
 
 O build ainda requer internet para baixar o FFmpeg na primeira vez e .NET SDK 8. A distribuição possui licença própria; consulte https://www.ffmpeg.org/legal.html e https://www.gyan.dev/ffmpeg/builds/.
 
 ## Usar
 
 1. Na máquina remota: senha de 12+ caracteres, FPS (comece com 30), **Compartilhar**.
-2. Na máquina controladora: IP, porta TCP 47890, senha e fingerprint SHA-256 do certificado do host; **Controlar**.
-3. Na máquina remota: aprove a solicitação; **Encerrar** interrompe a sessão.
+2. Para Relay, aprove o ID de cada computador uma vez com o administrador; clientes novos não usam token compartilhado.
+3. Na máquina controladora, selecione o host, informe a senha e aguarde a aprovação local. **Encerrar** interrompe a sessão.
 4. Use apenas LAN/VPN confiável; **não exponha** a porta diretamente à internet.
 
 ## Limitações e riscos

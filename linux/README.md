@@ -47,13 +47,13 @@ O Tunnel existente é um projeto .NET 8 independente e pode ser compilado para L
 
 ```bash
 # No computador remoto, com Compartilhar ativo na porta 47890
-./RemotePortable.Tunnel host remoteportable.cloud 47900 computador-01 SEU_RELAY_TOKEN 47890
+./RemotePortable.Tunnel host remoteportable.cloud 47900 ID_DERIVADO 47890 FINGERPRINT_SHA256
 
 # No controlador, em outro computador
-./RemotePortable.Tunnel join remoteportable.cloud 47900 computador-01 SEU_RELAY_TOKEN 47891
+./RemotePortable.Tunnel join remoteportable.cloud 47900 ID_DO_HOST 47891
 ```
 
-Use um identificador de 6 a 64 caracteres, alfanumérico ou hífen, igual nos dois lados. No cliente GUI, conecte a `127.0.0.1:47891`, com a senha e fingerprint do host.
+O host usa o ID derivado da chave local, exibido na interface. Na primeira execução, peça ao administrador para aprovar cada computador no Relay. No cliente GUI, conecte a `127.0.0.1:47891`, com a senha do host.
 
 ## Limitações e segurança
 
@@ -62,5 +62,5 @@ Use um identificador de 6 a 64 caracteres, alfanumérico ou hífen, igual nos do
 - Controle de mouse/teclado no host usa `xdotool` e depende de permissões da sessão X11.
 - A aprovação local é obrigatória para cada conexão; não há acesso silencioso ou serviço de inicialização automática.
 - O certificado do host é temporário, gerado a cada inicialização. O cliente deve validar seu SHA-256 antes de conectar.
-- O Relay não substitui a autenticação ponta a ponta: mantenha o token do Relay e a senha do host em segredo.
+- O Relay autentica dispositivos individualmente; a senha do host e a aprovação local continuam protegendo cada sessão.
 - O projeto ainda requer validação em máquinas Linux reais, especialmente da latência de vídeo e do comportamento do FFmpeg. Verifique o job de CI antes de usar o artefato.

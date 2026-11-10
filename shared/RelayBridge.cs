@@ -10,15 +10,16 @@ internal sealed record OnlineDevice(string Id, string Name, string Platform, str
 
 internal static class RelayDirectory
 {
-    public static async Task<IReadOnlyList<OnlineDevice>> ListAsync(string relay, int port, string token, CancellationToken ct = default)
+    public static async Task<IReadOnlyList<OnlineDevice>> ListAsync(string relay, int port, CancellationToken ct = default)
     {
-        if (string.IsNullOrWhiteSpace(token)) throw new ArgumentException("Informe o token do Relay.");
+        var identity = DeviceIdentity.LoadOrCreate();
+        await RelayClientAuth.EnsureApprovedAsync(relay, port, identity, ct);
         using var tcp = new TcpClient();
         await tcp.ConnectAsync(relay, port, ct);
         using var tls = new SslStream(tcp.GetStream(), false);
-        await tls.AuthenticateAsClientAsync(relay);
-        await tls.WriteAsync(Encoding.ASCII.GetBytes($"LIST {token} list-all\n"), ct);
-        var response = await ReadLineAsync(tls, ct);
+        await tls.AuthenticateAsClientAsync(relay, ct);
+        await RelayClientAuth.AuthenticateAsync(tls, identity, "LIST", "-", ct);
+        var response = await RelayClientAuth.ReadLineAsync(tls, ct);
         if (response.StartsWith("ERR")) throw new IOException("Relay: " + response);
         using var doc = JsonDocument.Parse(response);
         return doc.RootElement.EnumerateArray().Select(x => new OnlineDevice(
@@ -27,30 +28,19 @@ internal static class RelayDirectory
             x.GetProperty("platform").GetString() ?? "",
             x.GetProperty("fingerprint").GetString() ?? "")).ToArray();
     }
-    static async Task<string> ReadLineAsync(Stream stream, CancellationToken ct)
-    {
-        using var buffer = new MemoryStream();
-        var one = new byte[1];
-        while (buffer.Length < 65536)
-        {
-            if (await stream.ReadAsync(one, ct) == 0) throw new EndOfStreamException();
-            if (one[0] == 10) return Encoding.UTF8.GetString(buffer.ToArray()).TrimEnd('\r');
-            buffer.WriteByte(one[0]);
-        }
-        throw new InvalidDataException("Resposta muito longa.");
-    }
 }
 
 internal sealed class RelayTunnelProcess : IDisposable
 {
     readonly Process process;
     readonly TaskCompletionSource ready = new(TaskCreationOptions.RunContinuationsAsynchronously);
-    public RelayTunnelProcess(string mode, string relay, int relayPort, string id, string token, int localPort, string? fingerprint = null)
+    public event Action<string>? Message;
+    public RelayTunnelProcess(string mode, string relay, int relayPort, string id, int localPort, string? fingerprint = null)
     {
         var executable = Path.Combine(AppContext.BaseDirectory, OperatingSystem.IsWindows() ? "RemotePortable.Tunnel.exe" : "RemotePortable.Tunnel");
         if (!File.Exists(executable)) throw new FileNotFoundException("Coloque o executável RemotePortable.Tunnel na mesma pasta do aplicativo.", executable);
         var psi = new ProcessStartInfo(executable) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
-        foreach (var value in new[] { mode, relay, relayPort.ToString(), id, token, localPort.ToString() })
+        foreach (var value in new[] { mode, relay, relayPort.ToString(), id, localPort.ToString() })
             psi.ArgumentList.Add(value);
         if (mode == "host" && fingerprint != null) psi.ArgumentList.Add(fingerprint);
         process = Process.Start(psi) ?? throw new IOException("Não foi possível iniciar o Tunnel.");
@@ -59,14 +49,17 @@ internal sealed class RelayTunnelProcess : IDisposable
             try
             {
                 while (await process.StandardOutput.ReadLineAsync() is { } line)
+                {
                     if (line.StartsWith("JOIN:")) ready.TrySetResult();
+                    Message?.Invoke(line);
+                }
                 ready.TrySetException(new IOException("O Tunnel terminou antes de abrir a porta local."));
             }
             catch (Exception ex) { ready.TrySetException(ex); }
         });
         _ = Task.Run(async () =>
         {
-            try { while (await process.StandardError.ReadLineAsync() is { }) { } }
+            try { while (await process.StandardError.ReadLineAsync() is { } line) Message?.Invoke(line); }
             catch { }
         });
         _ = process.WaitForExitAsync().ContinueWith(_ => ready.TrySetException(new IOException("O Tunnel foi encerrado.")));
