@@ -123,8 +123,16 @@ internal sealed class MainForm : Form
             managedTunnel = new RelayTunnelProcess("join", relayHost.Text.Trim(), 47900, choice.Device.Id, relayToken.Text, 47891);
             ip.Text = "127.0.0.1";
             port.Value = 47891;
-            if (choice.Device.Fingerprint.Any(ch => ch != '0')) fingerprint.Text = choice.Device.Fingerprint;
+            if (choice.Device.Fingerprint.Length != 64 || choice.Device.Fingerprint.All(ch => ch == '0'))
+                throw new InvalidOperationException("Host ainda não publicou fingerprint TLS válido.");
+            fingerprint.Text = choice.Device.Fingerprint;
             await Task.Delay(350);
+            if (string.IsNullOrWhiteSpace(secret.Text))
+            {
+                MessageBox.Show("Informe a senha do host antes de conectar.", "Autenticação");
+                managedTunnel?.Dispose(); managedTunnel = null;
+                return;
+            }
             await StartClient();
         }
         catch (Exception ex) { status.Text = "Conexão: " + ex.Message; managedTunnel?.Dispose(); managedTunnel = null; }
@@ -159,16 +167,6 @@ internal sealed class MainForm : Form
         // O servidor executa fora da thread WinForms: leitura TLS e espera por clientes são bloqueantes.
         int generation = Interlocked.Increment(ref hostGeneration);
         Log($"Iniciando compartilhamento, geração {generation}, porta {hostPort}.");
-        try
-        {
-            if (useRelay.Checked)
-            {
-                if (string.IsNullOrWhiteSpace(relayToken.Text)) throw new ArgumentException("Informe o token do Relay.");
-                managedTunnel?.Dispose();
-                managedTunnel = new RelayTunnelProcess("host", relayHost.Text.Trim(), 47900, deviceId.Text.Trim(), relayToken.Text, hostPort);
-            }
-        }
-        catch (Exception ex) { Stop(); MessageBox.Show(ex.Message); return Task.CompletedTask; }
         _ = Task.Run(() => HostSupervisor(password, hostPort, hostFps, token, generation));
         return Task.CompletedTask;
     }
@@ -183,6 +181,15 @@ internal sealed class MainForm : Form
             using var cert = req.CreateSelfSigned(DateTimeOffset.UtcNow.AddMinutes(-5), DateTimeOffset.UtcNow.AddDays(1));
             certHash = Convert.ToHexString(SHA256.HashData(cert.RawData));
             OnUi(() => fingerprint.Text = certHash);
+            if (useRelay.Checked)
+            {
+                var relay = relayHost.Text.Trim();
+                var tokenValue = relayToken.Text;
+                var idValue = deviceId.Text.Trim();
+                if (string.IsNullOrWhiteSpace(tokenValue)) throw new ArgumentException("Informe o token do Relay.");
+                managedTunnel?.Dispose();
+                managedTunnel = new RelayTunnelProcess("host", relay, 47900, idValue, tokenValue, hostPort, certHash);
+            }
             int failures = 0;
             while (!token.IsCancellationRequested && generation == Volatile.Read(ref hostGeneration))
             {
