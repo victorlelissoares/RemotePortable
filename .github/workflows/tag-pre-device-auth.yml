@@ -26,5 +26,5 @@ jobs:
             echo "Tag already exists; not moving it"
             exit 0
           fi
-          git tag -a "$TAG" "$SHA" -m "Pre device-auth migration snapshot (not independently verified)"
+          git tag -a "$TAG" "$SHA" -m "Stable snapshot before the device-identity migration"
           git push origin "refs/tags/$TAG"
