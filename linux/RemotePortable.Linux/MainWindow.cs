@@ -135,7 +135,7 @@ internal sealed class MainWindow : Window
                 managedTunnel?.Dispose(); managedTunnel = null;
                 return;
             }
-            await Task.Delay(350);
+            await RelayTunnelProcess.WaitForLocalListenerAsync(47891);
             await Start(false);
         }
         catch (Exception ex) { status.Text = "Conexão: " + ex.Message; managedTunnel?.Dispose(); managedTunnel = null; }
