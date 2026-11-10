@@ -23,13 +23,13 @@ internal sealed class DiscoveryRegistry
     public void Remove(string id, string owner)
     {
         if (entries.TryGetValue(id, out var current) && current.Owner == owner)
-            entries.TryRemove(new KeyValuePair<string, Entry>(id, current));
+            ((ICollection<KeyValuePair<string, Entry>>)entries).Remove(new KeyValuePair<string, Entry>(id, current));
     }
     public Entry[] List()
     {
         var now = DateTimeOffset.UtcNow;
         foreach (var (id, entry) in entries)
-            if (now - entry.Seen > ttl) entries.TryRemove(new KeyValuePair<string, Entry>(id, entry));
+            if (now - entry.Seen > ttl) ((ICollection<KeyValuePair<string, Entry>>)entries).Remove(new KeyValuePair<string, Entry>(id, entry));
         return entries.Values.OrderBy(x => x.Name).Take(200).ToArray();
     }
     public static bool ValidId(string id) => id.Length is >= 6 and <= 64 && id.All(c => char.IsAsciiLetterOrDigit(c) || c == '-');
