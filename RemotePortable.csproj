@@ -9,6 +9,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Remove="relay/**/*.cs" />
+    <Compile Remove="linux/**/*.cs" />
     <EmbeddedResource Include="ffmpeg.exe" LogicalName="RemotePortable.Binaries.ffmpeg.exe" />
   </ItemGroup>
 </Project>
