@@ -44,29 +44,36 @@ internal static class RelayDirectory
 internal sealed class RelayTunnelProcess : IDisposable
 {
     readonly Process process;
+    readonly TaskCompletionSource ready = new(TaskCreationOptions.RunContinuationsAsynchronously);
     public RelayTunnelProcess(string mode, string relay, int relayPort, string id, string token, int localPort, string? fingerprint = null)
     {
         var executable = Path.Combine(AppContext.BaseDirectory, OperatingSystem.IsWindows() ? "RemotePortable.Tunnel.exe" : "RemotePortable.Tunnel");
         if (!File.Exists(executable)) throw new FileNotFoundException("Coloque o executável RemotePortable.Tunnel na mesma pasta do aplicativo.", executable);
-        var psi = new ProcessStartInfo(executable) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = false, RedirectStandardError = false };
+        var psi = new ProcessStartInfo(executable) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
         foreach (var value in new[] { mode, relay, relayPort.ToString(), id, token, localPort.ToString() })
             psi.ArgumentList.Add(value);
         if (mode == "host" && fingerprint != null) psi.ArgumentList.Add(fingerprint);
         process = Process.Start(psi) ?? throw new IOException("Não foi possível iniciar o Tunnel.");
-    }
-    public static async Task WaitForLocalListenerAsync(int port, CancellationToken ct = default)
-    {
-        for (int attempt = 0; attempt < 40; attempt++)
+        _ = Task.Run(async () =>
         {
-            using var client = new TcpClient();
             try
             {
-                await client.ConnectAsync("127.0.0.1", port, ct);
-                return;
+                while (await process.StandardOutput.ReadLineAsync() is { } line)
+                    if (line.StartsWith("JOIN:")) ready.TrySetResult();
+                ready.TrySetException(new IOException("O Tunnel terminou antes de abrir a porta local."));
             }
-            catch (SocketException) { await Task.Delay(100, ct); }
-        }
-        throw new TimeoutException("O Tunnel não abriu a porta local a tempo.");
+            catch (Exception ex) { ready.TrySetException(ex); }
+        });
+        _ = Task.Run(async () =>
+        {
+            try { while (await process.StandardError.ReadLineAsync() is { }) { } }
+            catch { }
+        });
+        _ = process.WaitForExitAsync().ContinueWith(_ => ready.TrySetException(new IOException("O Tunnel foi encerrado.")));
+    }
+    public async Task WaitUntilReadyAsync(CancellationToken ct = default)
+    {
+        await ready.Task.WaitAsync(TimeSpan.FromSeconds(10), ct);
     }
     public void Dispose()
     {
