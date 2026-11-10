@@ -71,7 +71,7 @@ internal sealed class MainForm : Form
             new Label { Text = "Senha:", AutoSize = true, Margin = new Padding(8, 8, 3, 3) }, secret,
             hostButton, connectButton, stopButton, allowInput,
             new Label { Text = "FPS:", AutoSize = true, Margin = new Padding(8, 8, 3, 3) }, fps,
-            new Label { Text = "Fingerprint TLS:", AutoSize = true, Margin = new Padding(8, 8, 3, 3) }, fingerprint });
+            new Label { Text = "Senha salva localmente", AutoSize = true } });
         top.Controls.AddRange(new Control[] { new Label { Text = "Relay:", AutoSize = true }, relayHost,
             new Label { Text = "Token:", AutoSize = true }, relayToken,
             new Label { Text = "Meu ID:", AutoSize = true }, deviceId, useRelay });
@@ -83,6 +83,12 @@ internal sealed class MainForm : Form
         quickConnect.Click += async (_, _) => await ConnectSelected();
         devices.DoubleClick += async (_, _) => await ConnectSelected();
         discoveryTimer.Tick += async (_, _) => { if (!string.IsNullOrWhiteSpace(relayToken.Text)) await RefreshDevices(); };
+        secret.Text = PasswordVault.Load() ?? "";
+        secret.Leave += (_, _) =>
+        {
+            if (secret.Text.Length >= 12 && !PasswordVault.Save(secret.Text))
+                status.Text = "Não foi possível salvar a senha.";
+        };
         discoveryTimer.Start();
         var bottom = new Panel { Dock = DockStyle.Bottom, Height = 56, Padding = new Padding(12) };
         status.Dock = DockStyle.Fill; bottom.Controls.Add(status);
@@ -157,6 +163,7 @@ internal sealed class MainForm : Form
     Task StartHost()
     {
         if (secret.Text.Length < 12) { MessageBox.Show("Use uma senha de pelo menos 12 caracteres."); return Task.CompletedTask; }
+        if (!PasswordVault.Save(secret.Text)) { MessageBox.Show("Não foi possível salvar a senha."); return Task.CompletedTask; }
         stopping = false;
         Busy(true);
         session = new CancellationTokenSource();
