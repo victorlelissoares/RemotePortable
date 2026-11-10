@@ -187,7 +187,7 @@ internal sealed class MainForm : Form
             using RSA rsa = RSA.Create(2048);
             var req = new CertificateRequest("CN=RemotePortable", rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
             req.CertificateExtensions.Add(new X509BasicConstraintsExtension(false, false, 0, false));
-            using var cert = req.CreateSelfSigned(DateTimeOffset.UtcNow.AddMinutes(-5), DateTimeOffset.UtcNow.AddDays(1));
+            using var cert = CreateServerCertificate(req);
             certHash = Convert.ToHexString(SHA256.HashData(cert.RawData));
             OnUi(() => fingerprint.Text = certHash);
             int failures = 0;
@@ -238,6 +238,22 @@ internal sealed class MainForm : Form
             if (!token.IsCancellationRequested && generation == Volatile.Read(ref hostGeneration))
                 OnUi(() => { if (!stopping && generation == Volatile.Read(ref hostGeneration)) Stop(); });
         }
+    }
+
+    static X509Certificate2 CreateServerCertificate(CertificateRequest request)
+    {
+        using var generated = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddMinutes(-5), DateTimeOffset.UtcNow.AddDays(1));
+        var pfx = generated.Export(X509ContentType.Pfx);
+        try
+        {
+            // Schannel cannot use an ephemeral private key for a server TLS certificate.
+            // Import into a temporary user keyset on Windows; keep the in-memory key on Linux.
+            var flags = OperatingSystem.IsWindows()
+                ? X509KeyStorageFlags.UserKeySet
+                : X509KeyStorageFlags.EphemeralKeySet;
+            return new X509Certificate2(pfx, (string?)null, flags);
+        }
+        finally { CryptographicOperations.ZeroMemory(pfx); }
     }
 
     async Task AcceptClients(TcpListener server, X509Certificate2 cert, string password, int hostPort, int hostFps, CancellationToken token)
