@@ -19,6 +19,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           TAG="v0.1.0-pre-device-auth"
           SHA="9046a6a077ddbf48f4281e90efbd6fce2d39e30c"
           git cat-file -e "${SHA}^{commit}"
