@@ -51,7 +51,7 @@ internal sealed class MainWindow : Window
         }
         Add("IP", address); Add("Porta", port); Add("Senha", password);
         toolbar.Children.Add(host); toolbar.Children.Add(connect); toolbar.Children.Add(stop);
-        toolbar.Children.Add(allowInput); Add("FPS", fps); Add("Fingerprint TLS", fingerprint);
+        toolbar.Children.Add(allowInput); Add("FPS", fps);
         Add("Relay", relayHost); Add("Token", relayToken); Add("ID", deviceId);
         toolbar.Children.Add(useRelay);
         var discoveryPanel = new StackPanel { Margin = new Thickness(10), Spacing = 5 };
@@ -64,6 +64,12 @@ internal sealed class MainWindow : Window
         quickConnect.Click += async (_, _) => await ConnectSelected();
         devices.DoubleTapped += async (_, _) => await ConnectSelected();
         directoryTimer.Tick += async (_, _) => { if (!string.IsNullOrWhiteSpace(relayToken.Text)) await RefreshDevices(); };
+        password.Text = PasswordVault.Load() ?? "";
+        password.LostFocus += (_, _) =>
+        {
+            if ((password.Text?.Length ?? 0) >= 12 && !PasswordVault.Save(password.Text!))
+                status.Text = "Não foi possível salvar a senha. Instale libsecret-tools e configure o chaveiro.";
+        };
         directoryTimer.Start();
         var top = new ScrollViewer { Content = toolbar, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, MaxHeight = 135 };
         viewer.Child = image;
@@ -143,6 +149,11 @@ internal sealed class MainWindow : Window
     async Task Start(bool isHost)
     {
         if (session != null) return;
+        if (isHost && !PasswordVault.Save(password.Text ?? ""))
+        {
+            status.Text = "Não foi possível salvar a senha. Verifique o chaveiro do Linux (libsecret-tools).";
+            return;
+        }
         var current = new RemoteSession();
         session = current;
         host.IsEnabled = connect.IsEnabled = false; stop.IsEnabled = true;
