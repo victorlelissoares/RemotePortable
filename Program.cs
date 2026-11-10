@@ -126,7 +126,7 @@ internal sealed class MainForm : Form
             if (choice.Device.Fingerprint.Length != 64 || choice.Device.Fingerprint.All(ch => ch == '0'))
                 throw new InvalidOperationException("Host ainda não publicou fingerprint TLS válido.");
             fingerprint.Text = choice.Device.Fingerprint;
-            await RelayTunnelProcess.WaitForLocalListenerAsync(47891);
+            await managedTunnel.WaitUntilReadyAsync();
             if (string.IsNullOrWhiteSpace(secret.Text))
             {
                 MessageBox.Show("Informe a senha do host antes de conectar.", "Autenticação");
