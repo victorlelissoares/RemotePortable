@@ -8,6 +8,7 @@ using Avalonia.Media.Imaging;
 using Avalonia.Platform;
 using Avalonia.Threading;
 using System.Runtime.InteropServices;
+using RemotePortable.Shared;
 
 namespace RemotePortable.Linux;
 
@@ -25,6 +26,15 @@ internal sealed class MainWindow : Window
     readonly TextBlock status = new() { Text = "Pronto", TextWrapping = TextWrapping.Wrap };
     readonly Image image = new() { Stretch = Stretch.Uniform, Focusable = true };
     readonly Border viewer = new() { Background = Brushes.Black, Child = null };
+    readonly TextBox relayHost = new() { Text = "remoteportable.cloud", Width = 180 };
+    readonly TextBox relayToken = new() { PasswordChar = '●', Width = 200, Watermark = "Token Relay" };
+    readonly TextBox deviceId = new() { Text = "linux-" + Environment.MachineName.ToLowerInvariant().Replace("_", "-"), Width = 180 };
+    readonly ListBox devices = new() { Height = 130 };
+    readonly Button refresh = new() { Content = "Atualizar" };
+    readonly Button quickConnect = new() { Content = "Conectar selecionado" };
+    readonly CheckBox useRelay = new() { Content = "Usar Relay", IsChecked = true };
+    readonly DispatcherTimer directoryTimer = new() { Interval = TimeSpan.FromSeconds(10) };
+    RelayTunnelProcess? managedTunnel;
     RemoteSession? session;
     WriteableBitmap? bitmap;
     int width, height;
@@ -42,10 +52,24 @@ internal sealed class MainWindow : Window
         Add("IP", address); Add("Porta", port); Add("Senha", password);
         toolbar.Children.Add(host); toolbar.Children.Add(connect); toolbar.Children.Add(stop);
         toolbar.Children.Add(allowInput); Add("FPS", fps); Add("Fingerprint TLS", fingerprint);
+        Add("Relay", relayHost); Add("Token", relayToken); Add("ID", deviceId);
+        toolbar.Children.Add(useRelay);
+        var discoveryPanel = new StackPanel { Margin = new Thickness(10), Spacing = 5 };
+        discoveryPanel.Children.Add(new TextBlock { Text = "Computadores online" });
+        discoveryPanel.Children.Add(devices);
+        var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
+        actions.Children.Add(refresh); actions.Children.Add(quickConnect);
+        discoveryPanel.Children.Add(actions);
+        refresh.Click += async (_, _) => await RefreshDevices();
+        quickConnect.Click += async (_, _) => await ConnectSelected();
+        devices.DoubleTapped += async (_, _) => await ConnectSelected();
+        directoryTimer.Tick += async (_, _) => { if (!string.IsNullOrWhiteSpace(relayToken.Text)) await RefreshDevices(); };
+        directoryTimer.Start();
         var top = new ScrollViewer { Content = toolbar, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, MaxHeight = 135 };
         viewer.Child = image;
         var layout = new DockPanel();
         DockPanel.SetDock(top, Dock.Top); layout.Children.Add(top);
+        DockPanel.SetDock(discoveryPanel, Dock.Top); layout.Children.Add(discoveryPanel);
         var bottom = new Border { Padding = new Thickness(12), Child = status };
         DockPanel.SetDock(bottom, Dock.Bottom); layout.Children.Add(bottom);
         layout.Children.Add(viewer);
@@ -53,7 +77,7 @@ internal sealed class MainWindow : Window
         host.Click += async (_, _) => await Start(true);
         connect.Click += async (_, _) => await Start(false);
         stop.Click += async (_, _) => await EndSession();
-        Closing += (_, _) => session?.Stop();
+        Closing += (_, _) => { directoryTimer.Stop(); session?.Stop(); managedTunnel?.Dispose(); };
         image.PointerMoved += (_, e) => Mouse(0, e.GetPosition(image));
         image.PointerPressed += (_, e) =>
         {
@@ -77,6 +101,36 @@ internal sealed class MainWindow : Window
         return key switch { Key.Back => 8, Key.Tab => 9, Key.Enter => 13, Key.Escape => 27,
             Key.Space => 32, Key.Left => 37, Key.Up => 38, Key.Right => 39,
             Key.Down => 40, Key.Delete => 46, _ => 0 };
+    }
+    async Task RefreshDevices()
+    {
+        if (string.IsNullOrWhiteSpace(relayToken.Text)) return;
+        try
+        {
+            var list = await RelayDirectory.ListAsync(relayHost.Text?.Trim() ?? "", 47900, relayToken.Text);
+            devices.ItemsSource = list.Select(x => new DeviceChoice(x)).ToArray();
+        }
+        catch (Exception ex) { status.Text = "Descoberta: " + ex.Message; }
+    }
+    sealed record DeviceChoice(OnlineDevice Device)
+    {
+        public override string ToString() => $"{Device.Name} ({Device.Platform}) — {Device.Id}";
+    }
+    async Task ConnectSelected()
+    {
+        if (devices.SelectedItem is not DeviceChoice choice || session != null) return;
+        try
+        {
+            managedTunnel?.Dispose();
+            managedTunnel = new RelayTunnelProcess("join", relayHost.Text?.Trim() ?? "", 47900,
+                choice.Device.Id, relayToken.Text ?? "", 47891);
+            address.Text = "127.0.0.1";
+            port.Value = 47891;
+            if (choice.Device.Fingerprint.Any(ch => ch != '0')) fingerprint.Text = choice.Device.Fingerprint;
+            await Task.Delay(350);
+            await Start(false);
+        }
+        catch (Exception ex) { status.Text = "Conexão: " + ex.Message; managedTunnel?.Dispose(); managedTunnel = null; }
     }
     async Task Start(bool isHost)
     {
@@ -119,6 +173,13 @@ internal sealed class MainWindow : Window
         };
         try
         {
+            if (isHost && useRelay.IsChecked == true)
+            {
+                if (string.IsNullOrWhiteSpace(relayToken.Text)) throw new ArgumentException("Informe o token do Relay.");
+                managedTunnel?.Dispose();
+                managedTunnel = new RelayTunnelProcess("host", relayHost.Text?.Trim() ?? "", 47900,
+                    deviceId.Text?.Trim() ?? "", relayToken.Text, (int)(port.Value ?? 47890));
+            }
             if (isHost)
                 await Task.Run(() => current.HostAsync((int)(port.Value ?? 47890), password.Text ?? "", (int)(fps.Value ?? 20), allowInput.IsChecked == true));
             else
@@ -128,6 +189,7 @@ internal sealed class MainWindow : Window
         finally
         {
             await current.DisposeAsync();
+            managedTunnel?.Dispose(); managedTunnel = null;
             if (ReferenceEquals(session, current)) session = null;
             host.IsEnabled = connect.IsEnabled = true; stop.IsEnabled = false;
         }
