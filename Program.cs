@@ -205,9 +205,22 @@ internal sealed class MainForm : Form
                     if (relayEnabled && managedTunnel == null)
                     {
                         if (string.IsNullOrWhiteSpace(relayCredential))
-                            throw new ArgumentException("Informe o token do Relay.");
-                        managedTunnel = new RelayTunnelProcess("host", relayAddress, 47900, relayDeviceId,
-                            relayCredential, hostPort, certHash);
+                        {
+                            SetStatus("Compartilhamento local ativo. Relay indisponível: autenticação do dispositivo ainda não configurada.");
+                        }
+                        else
+                        {
+                            try
+                            {
+                                managedTunnel = new RelayTunnelProcess("host", relayAddress, 47900, relayDeviceId,
+                                    relayCredential, hostPort, certHash);
+                            }
+                            catch (Exception relayError)
+                            {
+                                Log($"Relay indisponível; mantendo listener local: {relayError}");
+                                SetStatus("Compartilhamento local ativo; Relay indisponível.");
+                            }
+                        }
                     }
                     failures = 0;
                     Log($"Listener iniciado em 0.0.0.0:{hostPort}, PID {Environment.ProcessId}, geração {generation}.");
