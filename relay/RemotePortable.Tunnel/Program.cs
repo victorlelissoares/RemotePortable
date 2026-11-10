@@ -45,6 +45,8 @@ var relayPort = int.Parse(args[2]);
 var id = args[3];
 var token = args[4];
 var localPort = args.Length > 5 ? int.Parse(args[5]) : (mode == "host" ? 47890 : 47891);
+var hostFingerprint = mode == "host" && args.Length > 6 ? args[6].Trim().ToUpperInvariant() : new string('0', 64);
+if (hostFingerprint.Length != 64 || !hostFingerprint.All(Uri.IsHexDigit)) throw new ArgumentException("Fingerprint inválido");
 if (token.Length < 32) throw new ArgumentException("TOKEN deve ter pelo menos 32 caracteres");
 if (id.Length is < 6 or > 64 || !id.All(c => char.IsAsciiLetterOrDigit(c) || c == '-'))
     throw new ArgumentException("ID inválido");
@@ -95,7 +97,7 @@ if (mode == "host")
                 await tcp.ConnectAsync(relayHost, relayPort, shutdown.Token);
                 using var tls = new SslStream(tcp.GetStream(), false);
                 await tls.AuthenticateAsClientAsync(relayHost);
-                await tls.WriteAsync(Encoding.ASCII.GetBytes($"REGISTER {token} {id}\n{name} {platform} {new string('0', 64)}\n"), shutdown.Token);
+                await tls.WriteAsync(Encoding.ASCII.GetBytes($"REGISTER {token} {id}\n{name} {platform} {hostFingerprint}\n"), shutdown.Token);
                 if (await ReadLineAsync(tls, shutdown.Token) != "OK") throw new IOException("Registro automático recusado.");
                 Console.WriteLine($"Disponível na lista global: {name} ({id})");
                 while (!shutdown.IsCancellationRequested)
