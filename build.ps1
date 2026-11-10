@@ -45,5 +45,8 @@ Assert-FFmpeg $ffmpeg
 Write-Host 'Compilando RemotePortable...'
 dotnet publish (Join-Path $root 'RemotePortable.csproj') -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o (Join-Path $root 'publish')
 if ($LASTEXITCODE -ne 0) { throw 'Falha no dotnet publish.' }
+Write-Host 'Compilando Tunnel Windows...'
+dotnet publish (Join-Path $root 'relay/RemotePortable.Tunnel/RemotePortable.Tunnel.csproj') -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o (Join-Path $root 'publish')
+if ($LASTEXITCODE -ne 0) { throw 'Falha no publish do Tunnel.' }
 Remove-Item (Join-Path $root 'publish/ffmpeg.exe') -Force -ErrorAction SilentlyContinue
 Write-Host 'Concluido: publish/RemotePortable.exe (FFmpeg incorporado)'
