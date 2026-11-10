@@ -164,14 +164,18 @@ internal sealed class MainForm : Form
         string password = secret.Text;
         int hostPort = (int)port.Value;
         int hostFps = (int)fps.Value;
+        bool relayEnabled = useRelay.Checked;
+        string relayAddress = relayHost.Text.Trim();
+        string relayCredential = relayToken.Text;
+        string relayDeviceId = deviceId.Text.Trim();
         // O servidor executa fora da thread WinForms: leitura TLS e espera por clientes são bloqueantes.
         int generation = Interlocked.Increment(ref hostGeneration);
         Log($"Iniciando compartilhamento, geração {generation}, porta {hostPort}.");
-        _ = Task.Run(() => HostSupervisor(password, hostPort, hostFps, token, generation));
+        _ = Task.Run(() => HostSupervisor(password, hostPort, hostFps, token, generation, relayEnabled, relayAddress, relayCredential, relayDeviceId));
         return Task.CompletedTask;
     }
 
-    async Task HostSupervisor(string password, int hostPort, int hostFps, CancellationToken token, int generation)
+    async Task HostSupervisor(string password, int hostPort, int hostFps, CancellationToken token, int generation, bool relayEnabled, string relayAddress, string relayCredential, string relayDeviceId)
     {
         try
         {
@@ -181,15 +185,6 @@ internal sealed class MainForm : Form
             using var cert = req.CreateSelfSigned(DateTimeOffset.UtcNow.AddMinutes(-5), DateTimeOffset.UtcNow.AddDays(1));
             certHash = Convert.ToHexString(SHA256.HashData(cert.RawData));
             OnUi(() => fingerprint.Text = certHash);
-            if (useRelay.Checked)
-            {
-                var relay = relayHost.Text.Trim();
-                var tokenValue = relayToken.Text;
-                var idValue = deviceId.Text.Trim();
-                if (string.IsNullOrWhiteSpace(tokenValue)) throw new ArgumentException("Informe o token do Relay.");
-                managedTunnel?.Dispose();
-                managedTunnel = new RelayTunnelProcess("host", relay, 47900, idValue, tokenValue, hostPort, certHash);
-            }
             int failures = 0;
             while (!token.IsCancellationRequested && generation == Volatile.Read(ref hostGeneration))
             {
@@ -199,6 +194,14 @@ internal sealed class MainForm : Form
                     server = new TcpListener(IPAddress.Any, hostPort);
                     server.Start();
                     listener = server;
+                    // Announce only after the local host is actually accepting TCP connections.
+                    if (relayEnabled && managedTunnel == null)
+                    {
+                        if (string.IsNullOrWhiteSpace(relayCredential))
+                            throw new ArgumentException("Informe o token do Relay.");
+                        managedTunnel = new RelayTunnelProcess("host", relayAddress, 47900, relayDeviceId,
+                            relayCredential, hostPort, certHash);
+                    }
                     failures = 0;
                     Log($"Listener iniciado em 0.0.0.0:{hostPort}, PID {Environment.ProcessId}, geração {generation}.");
                     SetStatus($"Aguardando conexão na porta {hostPort}.");
