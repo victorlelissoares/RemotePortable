@@ -18,6 +18,7 @@ var legacyToken = Environment.GetEnvironmentVariable("RELAY_LEGACY_TOKEN");
 Directory.CreateDirectory(dataPath);
 if (args.Length == 2 && args[0] is "approve" or "revoke")
 {
+    await using var dataLock = await AcquireDataLockAsync(CancellationToken.None);
     var target = args[1].ToLowerInvariant();
     if (!ValidDeviceId(target)) throw new ArgumentException("ID de dispositivo inválido.");
     var approved = await LoadKeysAsync(approvedPath, CancellationToken.None);
@@ -41,7 +42,6 @@ if (args.Length == 2 && args[0] is "approve" or "revoke")
 using var cert = new X509Certificate2(certPath, certPassword, X509KeyStorageFlags.EphemeralKeySet);
 var waiting = new ConcurrentDictionary<string, HostEntry>(StringComparer.OrdinalIgnoreCase);
 var discovery = new DiscoveryRegistry();
-var enrollmentWriteLock = new SemaphoreSlim(1, 1);
 var listener = new TcpListener(IPAddress.Any, port);
 listener.Start(256);
 Console.WriteLine($"Relay TLS escutando na porta {port}; cadastro manual habilitado; compatibilidade antiga={(string.IsNullOrEmpty(legacyToken) ? "desativada" : "temporária")}");
@@ -84,7 +84,8 @@ while (true)
                 }
                 var deviceId = fields[1];
                 var targetId = fields[3];
-                if (fields[2] == "LIST" ? targetId != "-" : !ValidDeviceId(targetId))
+                if (fields[2] == "LIST" ? targetId != "-" :
+                    fields[2] == "JOIN" ? !ValidLegacyId(targetId) : !ValidDeviceId(targetId))
                 {
                     await WriteLineAsync(tls, "ERR target"); return;
                 }
@@ -175,14 +176,15 @@ async Task EnrollAsync(Stream stream, string publicKey, CancellationToken ct)
         {
             await WriteLineAsync(stream, "APPROVED " + id); return;
         }
-        await enrollmentWriteLock.WaitAsync(ct);
-        try
+        await using var dataLock = await AcquireDataLockAsync(ct);
+        var approvedAfterLock = await LoadKeysAsync(approvedPath, ct);
+        if (approvedAfterLock.TryGetValue(id, out existing) && FixedEquals(existing, publicKey))
         {
-            var pending = await LoadKeysAsync(pendingPath, ct);
-            pending[id] = publicKey;
-            await SaveKeysAsync(pendingPath, pending, ct);
+            await WriteLineAsync(stream, "APPROVED " + id); return;
         }
-        finally { enrollmentWriteLock.Release(); }
+        var pending = await LoadKeysAsync(pendingPath, ct);
+        pending[id] = publicKey;
+        await SaveKeysAsync(pendingPath, pending, ct);
         Console.WriteLine($"Novo dispositivo aguardando aprovação: {id}");
         await WriteLineAsync(stream, "PENDING " + id);
     }
@@ -260,9 +262,23 @@ static async Task<Dictionary<string, string>> LoadKeysAsync(string path, Cancell
 }
 static async Task SaveKeysAsync(string path, Dictionary<string, string> keys, CancellationToken ct)
 {
-    var temp = path + ".tmp";
-    await using (var file = File.Create(temp)) await JsonSerializer.SerializeAsync(file, keys, cancellationToken: ct);
-    File.Move(temp, path, true);
+    var temp = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+    try
+    {
+        await using (var file = File.Create(temp)) await JsonSerializer.SerializeAsync(file, keys, cancellationToken: ct);
+        File.Move(temp, path, true);
+    }
+    finally { if (File.Exists(temp)) File.Delete(temp); }
+}
+async Task<FileStream> AcquireDataLockAsync(CancellationToken ct)
+{
+    var lockPath = Path.Combine(dataPath, "devices.lock");
+    while (true)
+    {
+        ct.ThrowIfCancellationRequested();
+        try { return new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None); }
+        catch (IOException) { await Task.Delay(50, ct); }
+    }
 }
 static bool ValidDeviceId(string id) => id.Length == 64 && id.All(Uri.IsHexDigit);
 static bool ValidLegacyId(string id) => id.Length is >= 6 and <= 64 && id.All(c => char.IsAsciiLetterOrDigit(c) || c == '-');
