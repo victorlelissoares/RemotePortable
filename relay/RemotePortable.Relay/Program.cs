@@ -154,13 +154,23 @@ while (true)
                 {
                     phase = "HOST pairing wait";
                     var entry = new HostEntry(tls);
-                    if (!waiting.TryAdd(targetId, entry)) { await WriteLineAsync(tls, "ERR id-in-use"); return; }
+                    if (!waiting.TryAdd(targetId, entry))
+                    {
+                        Console.WriteLine($"{DateTimeOffset.UtcNow:O} peer={peer} action=HOST device={deviceId} target={targetId} id-in-use");
+                        await WriteLineAsync(tls, "ERR id-in-use"); return;
+                    }
                     try
                     {
                         Console.WriteLine($"{DateTimeOffset.UtcNow:O} peer={peer} action=HOST device={deviceId} waiting");
                         await WriteLineAsync(tls, "WAIT");
                         using var waitTimeout = new CancellationTokenSource(TimeSpan.FromMinutes(30));
-                        await entry.Paired.Task.WaitAsync(waitTimeout.Token);
+                        while (!entry.Paired.Task.IsCompleted)
+                        {
+                            if (tcp.Client.Poll(0, SelectMode.SelectRead) && tcp.Client.Available == 0)
+                                throw new IOException("Host disconnected while waiting for controller.");
+                            await Task.Delay(500, waitTimeout.Token);
+                        }
+                        await entry.Paired.Task;
                         phase = "HOST relay pair";
                         await RelayPairAsync(entry.Stream, entry.Peer!);
                     }
