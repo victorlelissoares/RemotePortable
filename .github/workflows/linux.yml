@@ -30,6 +30,8 @@ jobs:
         run: dotnet publish linux/RemotePortable.Linux/RemotePortable.Linux.csproj -c Release -r linux-x64 --self-contained true -p:PublishSingleFile=false -o out/desktop
       - name: Publish Linux tunnel
         run: dotnet publish relay/RemotePortable.Tunnel/RemotePortable.Tunnel.csproj -c Release -r linux-x64 --self-contained true -p:PublishSingleFile=true -o out/tunnel
+      - name: Include Tunnel in graphical application bundle
+        run: cp out/tunnel/RemotePortable.Tunnel out/desktop/RemotePortable.Tunnel
       - name: Package artifacts
         run: |
           chmod +x out/desktop/RemotePortable.Linux out/tunnel/RemotePortable.Tunnel
