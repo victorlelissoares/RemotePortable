@@ -6,7 +6,6 @@ on:
       - Build RemotePortable Windows x64
       - Linux Desktop and Tunnel
     types: [completed]
-  workflow_dispatch:
 
 permissions:
   contents: write
@@ -19,10 +18,9 @@ concurrency:
 jobs:
   publish:
     if: >-
-      github.event_name == 'workflow_dispatch' ||
-      (github.event.workflow_run.conclusion == 'success' &&
-       github.event.workflow_run.head_branch == 'master' &&
-       github.event.workflow_run.head_repository.full_name == github.repository)
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_branch == 'master' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
     runs-on: ubuntu-24.04
     steps:
       - name: Download successful build artifacts
@@ -34,10 +32,6 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p downloads
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            echo "Run the Windows/Linux build workflows; this workflow publishes their successful results."
-            exit 1
-          fi
           if [[ "$RUN_NAME" == "Build RemotePortable Windows x64" ]]; then
             gh run download "$RUN_ID" --repo "$REPO" --name RemotePortable-Windows-x64 --dir downloads
           elif [[ "$RUN_NAME" == "Linux Desktop and Tunnel" ]]; then
