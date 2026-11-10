@@ -6,6 +6,7 @@ using System.Security.Authentication;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
+using System.Text.Json;
 
 var port = int.Parse(Environment.GetEnvironmentVariable("RELAY_PORT") ?? "47900");
 var token = Environment.GetEnvironmentVariable("RELAY_TOKEN") ?? throw new InvalidOperationException("RELAY_TOKEN obrigatório");
@@ -14,6 +15,7 @@ var certPath = Environment.GetEnvironmentVariable("RELAY_CERT_PATH") ?? throw ne
 var certPassword = Environment.GetEnvironmentVariable("RELAY_CERT_PASSWORD") ?? "";
 using var cert = new X509Certificate2(certPath, certPassword, X509KeyStorageFlags.EphemeralKeySet);
 var waiting = new ConcurrentDictionary<string, HostEntry>();
+var discovery = new DiscoveryRegistry();
 var listener = new TcpListener(IPAddress.Any, port);
 listener.Start();
 Console.WriteLine($"Relay TLS escutando na porta {port}");
@@ -44,7 +46,35 @@ while (true)
                     await WriteLineAsync(tls, "ERR auth"); return;
                 }
                 var id = fields[2];
-                if (fields[0] == "HOST")
+                if (fields[0] == "LIST")
+                {
+                    // LIST is authorized by the same shared Relay token; entries are opt-in.
+                    await WriteLineAsync(tls, JsonSerializer.Serialize(discovery.List().Select(x => new {
+                        id = x.Id, name = x.Name, platform = x.Platform, fingerprint = x.Fingerprint
+                    })));
+                }
+                else if (fields[0] == "REGISTER")
+                {
+                    var owner = Guid.NewGuid().ToString("N");
+                    var meta = (await ReadLineAsync(tls, timeout.Token)).Split(' ', 3);
+                    if (meta.Length != 3 || !discovery.Register(id, meta[0], meta[1], meta[2], owner))
+                    {
+                        await WriteLineAsync(tls, "ERR register"); return;
+                    }
+                    await WriteLineAsync(tls, "OK");
+                    try
+                    {
+                        while (true)
+                        {
+                            using var beatTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(35));
+                            if (await ReadLineAsync(tls, beatTimeout.Token) != "PING" || !discovery.Heartbeat(id, owner))
+                                break;
+                            await WriteLineAsync(tls, "PONG");
+                        }
+                    }
+                    finally { discovery.Remove(id, owner); }
+                }
+                else if (fields[0] == "HOST")
                 {
                     var entry = new HostEntry(tls);
                     if (!waiting.TryAdd(id, entry)) { await WriteLineAsync(tls, "ERR id-in-use"); return; }
