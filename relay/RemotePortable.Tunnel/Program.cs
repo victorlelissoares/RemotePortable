@@ -10,7 +10,7 @@ if (args.Length == 4 && args[0] == "list")
     await tcp.ConnectAsync(args[1], int.Parse(args[2]));
     using var tls = new SslStream(tcp.GetStream(), false);
     await tls.AuthenticateAsClientAsync(args[1]);
-    await tls.WriteAsync(Encoding.ASCII.GetBytes($"LIST {args[3]} list-all\\n".Replace("\\\\n", "\\n")));
+    await tls.WriteAsync(Encoding.ASCII.GetBytes($"LIST {args[3]} list-all\n"));
     var response = await ReadLineAsync(tls, CancellationToken.None);
     if (response.StartsWith("ERR")) throw new IOException(response);
     using var doc = JsonDocument.Parse(response);
@@ -24,13 +24,13 @@ if (args.Length == 7 && args[0] == "register")
     await tcp.ConnectAsync(args[1], int.Parse(args[2]));
     using var tls = new SslStream(tcp.GetStream(), false);
     await tls.AuthenticateAsClientAsync(args[1]);
-    await tls.WriteAsync(Encoding.ASCII.GetBytes($"REGISTER {args[4]} {args[3]}\\n{args[5]} {System.Runtime.InteropServices.RuntimeInformation.OSDescription.Split(' ')[0].Replace('-', '_')} {args[6]}\\n".Replace("\\\\n", "\\n")));
+    await tls.WriteAsync(Encoding.ASCII.GetBytes($"REGISTER {args[4]} {args[3]}\n{args[5]} {System.Runtime.InteropServices.RuntimeInformation.OSDescription.Split(' ')[0].Replace('-', '_')} {args[6]}\n"));
     if (await ReadLineAsync(tls, CancellationToken.None) != "OK") throw new IOException("Registro recusado pelo Relay.");
     Console.WriteLine("Dispositivo anunciado. Ctrl+C para sair.");
     while (true)
     {
         await Task.Delay(15000);
-        await tls.WriteAsync(Encoding.ASCII.GetBytes("PING\\n".Replace("\\\\n", "\\n")));
+        await tls.WriteAsync(Encoding.ASCII.GetBytes("PING\n"));
         if (await ReadLineAsync(tls, CancellationToken.None) != "PONG") throw new IOException("Heartbeat recusado.");
     }
 }
