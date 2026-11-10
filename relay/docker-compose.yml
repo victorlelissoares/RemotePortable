@@ -8,11 +8,15 @@ services:
       RELAY_PORT: "47900"
       RELAY_CERT_PATH: "/certs/relay.pfx"
       RELAY_CERT_PASSWORD: "${RELAY_CERT_PASSWORD:?Configure RELAY_CERT_PASSWORD}"
-      RELAY_TOKEN: "${RELAY_TOKEN:?Configure RELAY_TOKEN no arquivo .env}"
+      RELAY_DATA_PATH: "/data"
+      RELAY_LEGACY_TOKEN: "${RELAY_TOKEN-}"
     volumes:
       - ./certs/relay.pfx:/certs/relay.pfx:ro
+      - relay-data:/data
     security_opt:
       - no-new-privileges:true
     read_only: true
     cap_drop:
       - ALL
+volumes:
+  relay-data:

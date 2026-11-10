@@ -27,8 +27,7 @@ internal sealed class MainWindow : Window
     readonly Image image = new() { Stretch = Stretch.Uniform, Focusable = true };
     readonly Border viewer = new() { Background = Brushes.Black, Child = null };
     readonly TextBox relayHost = new() { Text = "remoteportable.cloud", Width = 180 };
-    readonly TextBox relayToken = new() { PasswordChar = '●', Width = 200, Watermark = "Token Relay" };
-    readonly TextBox deviceId = new() { Text = "linux-" + Environment.MachineName.ToLowerInvariant().Replace("_", "-"), Width = 180 };
+    readonly TextBox deviceId = new() { Text = DeviceIdentity.LoadOrCreate().Id, Width = 290, IsReadOnly = true };
     readonly ListBox devices = new() { Height = 130 };
     readonly Button refresh = new() { Content = "Atualizar" };
     readonly Button quickConnect = new() { Content = "Conectar selecionado" };
@@ -52,7 +51,7 @@ internal sealed class MainWindow : Window
         Add("IP", address); Add("Porta", port); Add("Senha", password);
         toolbar.Children.Add(host); toolbar.Children.Add(connect); toolbar.Children.Add(stop);
         toolbar.Children.Add(allowInput); Add("FPS", fps);
-        Add("Relay", relayHost); Add("Token", relayToken); Add("ID", deviceId);
+        Add("Relay", relayHost); Add("ID deste dispositivo", deviceId);
         toolbar.Children.Add(useRelay);
         var discoveryPanel = new StackPanel { Margin = new Thickness(10), Spacing = 5 };
         discoveryPanel.Children.Add(new TextBlock { Text = "Computadores online" });
@@ -63,7 +62,7 @@ internal sealed class MainWindow : Window
         refresh.Click += async (_, _) => await RefreshDevices();
         quickConnect.Click += async (_, _) => await ConnectSelected();
         devices.DoubleTapped += async (_, _) => await ConnectSelected();
-        directoryTimer.Tick += async (_, _) => { if (!string.IsNullOrWhiteSpace(relayToken.Text)) await RefreshDevices(); };
+        directoryTimer.Tick += async (_, _) => { if (!string.IsNullOrWhiteSpace(relayHost.Text)) await RefreshDevices(); };
         password.Text = PasswordVault.Load() ?? "";
         password.LostFocus += (_, _) =>
         {
@@ -110,10 +109,10 @@ internal sealed class MainWindow : Window
     }
     async Task RefreshDevices()
     {
-        if (string.IsNullOrWhiteSpace(relayToken.Text)) return;
+        if (string.IsNullOrWhiteSpace(relayHost.Text)) return;
         try
         {
-            var list = await RelayDirectory.ListAsync(relayHost.Text?.Trim() ?? "", 47900, relayToken.Text);
+            var list = await RelayDirectory.ListAsync(relayHost.Text?.Trim() ?? "", 47900);
             devices.ItemsSource = list.Select(x => new DeviceChoice(x)).ToArray();
         }
         catch (Exception ex) { status.Text = "Descoberta: " + ex.Message; }
@@ -129,7 +128,8 @@ internal sealed class MainWindow : Window
         {
             managedTunnel?.Dispose();
             managedTunnel = new RelayTunnelProcess("join", relayHost.Text?.Trim() ?? "", 47900,
-                choice.Device.Id, relayToken.Text ?? "", 47891);
+                choice.Device.Id, 47891);
+            managedTunnel.Message += line => Dispatcher.UIThread.Post(() => status.Text = "Relay: " + line);
             address.Text = "127.0.0.1";
             port.Value = 47891;
             if (choice.Device.Fingerprint.Length != 64 || choice.Device.Fingerprint.All(ch => ch == '0'))
@@ -169,7 +169,8 @@ internal sealed class MainWindow : Window
                     {
                         managedTunnel?.Dispose();
                         managedTunnel = new RelayTunnelProcess("host", relayHost.Text?.Trim() ?? "", 47900,
-                            deviceId.Text?.Trim() ?? "", relayToken.Text ?? "", (int)(port.Value ?? 47890), fingerprint.Text);
+                            deviceId.Text?.Trim() ?? "", (int)(port.Value ?? 47890), fingerprint.Text);
+                        managedTunnel.Message += line => Dispatcher.UIThread.Post(() => status.Text = "Relay: " + line);
                     }
                     catch (Exception ex) { status.Text = "Relay: " + ex.Message; }
                 }

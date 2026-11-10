@@ -1,39 +1,41 @@
-# Descoberta global de dispositivos — protocolo experimental
+# Identidade e descoberta do Relay
 
-O Relay aceita conexões TLS em `remoteportable.cloud:47900` com token compartilhado.
+O cliente não recebe nem armazena token compartilhado. Na primeira execução, cria uma chave ECDSA P-256 por dispositivo. O ID mostrado pela interface é o SHA-256 da chave pública. A chave privada fica protegida pelo DPAPI no Windows e em arquivo restrito ao usuário no Linux.
 
-## Segurança
+## Aprovação inicial
 
-A listagem global é **opt-in**: somente hosts registrados explicitamente aparecem. Qualquer cliente que possua o `RELAY_TOKEN` consegue listar IDs, nomes, plataformas e fingerprints dos dispositivos publicados. Isso **não** é uma autorização individual por conta e não permite controlar uma máquina sem a senha do host e sua aprovação local. Para ambientes com múltiplos usuários, substitua o token global por credenciais individuais antes de produção.
+1. Inicie o aplicativo no computador. O Relay registra a chave pública como pendente e a interface mostra o ID que precisa de aprovação.
+2. No diretório do Relay na VPS, aprove o ID:
 
-O registro expira após 45 segundos sem heartbeat, é removido ao encerrar a conexão e é mantido apenas em memória. A lista é limitada a 200 dispositivos.
+   ```sh
+   docker compose run --rm --no-deps relay approve ID_DO_DISPOSITIVO
+   ```
 
-## Comandos do Tunnel
+3. Atualize a lista ou reinicie a conexão. O dispositivo aprovado poderá anunciar e descobrir hosts.
 
-```bash
-# Consultar dispositivos anunciados
-./RemotePortable.Tunnel list remoteportable.cloud 47900 SEU_RELAY_TOKEN
+Para revogar:
 
-# Anunciar host (em outro terminal, enquanto o host e seu túnel estão ativos)
-./RemotePortable.Tunnel register remoteportable.cloud 47900 computador-01 SEU_RELAY_TOKEN PC-Escritorio FINGERPRINT_SHA256
-
-# Host tradicional (túnel de dados, ainda executado separadamente)
-./RemotePortable.Tunnel host remoteportable.cloud 47900 computador-01 SEU_RELAY_TOKEN 47890
-
-# Controlador tradicional
-./RemotePortable.Tunnel join remoteportable.cloud 47900 computador-01 SEU_RELAY_TOKEN 47891
+```sh
+docker compose run --rm --no-deps relay revoke ID_DO_DISPOSITIVO
 ```
 
-O ID deve conter 6–64 caracteres alfanuméricos ou hífen. O nome anunciado deve conter somente letras, números, ponto, hífen ou sublinhado. O fingerprint SHA-256 deve ter 64 caracteres hexadecimais.
+As listas `pending-devices.json` e `approved-devices.json` ficam no volume Docker `relay-data`. Faça backup desse volume. Revogar impede novas autenticações; uma sessão já estabelecida termina quando a conexão cair.
 
-## Protocolo de controle
+## Protocolo novo
 
-Após autenticação TLS:
-- `LIST TOKEN list-all\n`: retorna uma linha JSON com dispositivos ativos.
-- `REGISTER TOKEN ID\nNOME PLATAFORMA FINGERPRINT\n`: retorna `OK`; mantém a conexão aberta.
-- `PING\n` a cada 15 segundos: retorna `PONG`.
-- `HOST`/`JOIN` continuam compatíveis com a versão anterior.
+O cliente envia a chave pública para inscrição. Cada comando autenticado recebe um nonce aleatório e exige uma assinatura ECDSA vinculada à ação, ao dispositivo e ao host alvo. O Relay confere o ID derivado da chave e só permite que um dispositivo anuncie o próprio ID. `JOIN` continua exigindo a senha configurada no host e a aprovação local da sessão.
 
-## Estado da implementação
+O administrador deve aprovar cada instalação nova. Não existe rota para baixar chaves privadas ou obter uma credencial global.
 
-Este incremento implementa registro, heartbeat, listagem autenticada e CLI multiplataforma. **Ainda não implementa a lista na interface gráfica nem conexão com um clique**; essas funções exigem integrar o ciclo de vida do túnel às interfaces Windows e Linux. Não confunda o protocolo experimental com a experiência completa do AnyDesk.
+## Compatibilidade durante migração
+
+Para permitir a atualização dos computadores sem indisponibilidade, o Relay aceita temporariamente o protocolo antigo quando `RELAY_TOKEN` está configurado no `.env` da VPS. Os novos clientes não usam esse segredo. Depois de atualizar e aprovar todos os dispositivos, remova `RELAY_TOKEN` do `.env` e recrie o serviço; o protocolo antigo ficará desativado. O token não deve voltar aos binários.
+
+## Executar o Tunnel manualmente
+
+```sh
+./RemotePortable.Tunnel host remoteportable.cloud 47900 ID_DERIVADO 47890 FINGERPRINT_SHA256
+./RemotePortable.Tunnel join remoteportable.cloud 47900 ID_DO_HOST 47891
+```
+
+O modo `host` usa o ID mostrado pelo próprio aplicativo. O modo `join` recebe o ID do host selecionado na lista.

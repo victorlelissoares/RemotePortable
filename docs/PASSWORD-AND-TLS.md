@@ -1,6 +1,6 @@
 # Senha persistente e fingerprint TLS automático
 
-A interface Windows/Linux não exibe mais o campo manual de fingerprint TLS. Na conexão por dispositivo da lista, o aplicativo recebe o fingerprint anunciado pelo Relay e continua validando o certificado TLS do host. **Isso não equivale a identidade autenticada do host:** um participante que conhece o token compartilhado pode registrar outro fingerprint para um ID; para produção, implemente identidade persistente e verificação de chave previamente confiável.
+A interface Windows/Linux não exibe mais o campo manual de fingerprint TLS. O Relay autentica cada dispositivo com chave ECDSA persistente, desafio aleatório e assinatura. O host só pode anunciar o ID derivado da própria chave. O TLS da sessão remota continua validado pelo fingerprint publicado, e a senha e a aprovação local do host continuam obrigatórias.
 
 ## Senha
 
@@ -17,4 +17,4 @@ Se o chaveiro não estiver disponível, o aplicativo avisa que não conseguiu sa
 
 ## Limitações
 
-A conexão direta por IP sem um dispositivo selecionado ainda exige uma identidade TLS previamente conhecida. A interface não permite mais digitar o fingerprint manualmente: utilize a lista do Relay. A publicação de fingerprints pelo Relay compartilhado não oferece proteção completa contra personificação.
+A conexão direta por IP sem um dispositivo selecionado ainda exige uma identidade TLS previamente conhecida. A interface não permite digitar o fingerprint manualmente: utilize a lista do Relay. Durante a atualização, o Relay pode manter temporariamente o protocolo antigo se `RELAY_TOKEN` ainda estiver definido no servidor; os clientes novos nunca usam esse token.

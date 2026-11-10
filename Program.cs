@@ -36,8 +36,7 @@ internal sealed class MainForm : Form
     readonly CheckBox allowInput = new() { Text = "Permitir mouse e teclado", Checked = true, AutoSize = true };
     readonly PictureBox screen = new() { Dock = DockStyle.Fill, SizeMode = PictureBoxSizeMode.Zoom, BackColor = Color.FromArgb(28, 31, 38), TabStop = true };
     readonly TextBox relayHost = new() { Text = "remoteportable.cloud", Width = 170 };
-    readonly TextBox relayToken = new() { Width = 180, UseSystemPasswordChar = true, PlaceholderText = "Token do Relay" };
-    readonly TextBox deviceId = new() { Text = "win-" + Environment.MachineName.ToLowerInvariant().Replace("_", "-"), Width = 155 };
+    readonly TextBox deviceId = new() { Text = DeviceIdentity.LoadOrCreate().Id, Width = 290, ReadOnly = true };
     readonly ListBox devices = new() { Width = 320, Height = 120, Dock = DockStyle.Fill };
     readonly Button refresh = new() { Text = "Atualizar", AutoSize = true };
     readonly Button quickConnect = new() { Text = "Conectar selecionado", AutoSize = true };
@@ -73,8 +72,7 @@ internal sealed class MainForm : Form
             new Label { Text = "FPS:", AutoSize = true, Margin = new Padding(8, 8, 3, 3) }, fps,
             new Label { Text = "Senha salva localmente", AutoSize = true } });
         top.Controls.AddRange(new Control[] { new Label { Text = "Relay:", AutoSize = true }, relayHost,
-            new Label { Text = "Token:", AutoSize = true }, relayToken,
-            new Label { Text = "Meu ID:", AutoSize = true }, deviceId, useRelay });
+            new Label { Text = "ID deste dispositivo:", AutoSize = true }, deviceId, useRelay });
         var directory = new Panel { Dock = DockStyle.Left, Width = 330, Padding = new Padding(8) };
         var directoryActions = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 40 };
         directoryActions.Controls.AddRange(new Control[] { refresh, quickConnect });
@@ -82,7 +80,7 @@ internal sealed class MainForm : Form
         refresh.Click += async (_, _) => await RefreshDevices();
         quickConnect.Click += async (_, _) => await ConnectSelected();
         devices.DoubleClick += async (_, _) => await ConnectSelected();
-        discoveryTimer.Tick += async (_, _) => { if (!string.IsNullOrWhiteSpace(relayToken.Text)) await RefreshDevices(); };
+        discoveryTimer.Tick += async (_, _) => { if (!string.IsNullOrWhiteSpace(relayHost.Text)) await RefreshDevices(); };
         secret.Text = PasswordVault.Load() ?? "";
         secret.Leave += (_, _) =>
         {
@@ -111,10 +109,10 @@ internal sealed class MainForm : Form
     }
     async Task RefreshDevices()
     {
-        if (string.IsNullOrWhiteSpace(relayToken.Text)) return;
+        if (string.IsNullOrWhiteSpace(relayHost.Text)) return;
         try
         {
-            var list = await RelayDirectory.ListAsync(relayHost.Text.Trim(), 47900, relayToken.Text);
+            var list = await RelayDirectory.ListAsync(relayHost.Text.Trim(), 47900);
             devices.Items.Clear();
             foreach (var device in list) devices.Items.Add(new DeviceChoice(device));
         }
@@ -126,7 +124,8 @@ internal sealed class MainForm : Form
         try
         {
             managedTunnel?.Dispose();
-            managedTunnel = new RelayTunnelProcess("join", relayHost.Text.Trim(), 47900, choice.Device.Id, relayToken.Text, 47891);
+            managedTunnel = new RelayTunnelProcess("join", relayHost.Text.Trim(), 47900, choice.Device.Id, 47891);
+            managedTunnel.Message += line => SetStatus("Relay: " + line);
             ip.Text = "127.0.0.1";
             port.Value = 47891;
             if (choice.Device.Fingerprint.Length != 64 || choice.Device.Fingerprint.All(ch => ch == '0'))
@@ -173,16 +172,15 @@ internal sealed class MainForm : Form
         int hostFps = (int)fps.Value;
         bool relayEnabled = useRelay.Checked;
         string relayAddress = relayHost.Text.Trim();
-        string relayCredential = relayToken.Text;
         string relayDeviceId = deviceId.Text.Trim();
         // O servidor executa fora da thread WinForms: leitura TLS e espera por clientes são bloqueantes.
         int generation = Interlocked.Increment(ref hostGeneration);
         Log($"Iniciando compartilhamento, geração {generation}, porta {hostPort}.");
-        _ = Task.Run(() => HostSupervisor(password, hostPort, hostFps, token, generation, relayEnabled, relayAddress, relayCredential, relayDeviceId));
+        _ = Task.Run(() => HostSupervisor(password, hostPort, hostFps, token, generation, relayEnabled, relayAddress, relayDeviceId));
         return Task.CompletedTask;
     }
 
-    async Task HostSupervisor(string password, int hostPort, int hostFps, CancellationToken token, int generation, bool relayEnabled, string relayAddress, string relayCredential, string relayDeviceId)
+    async Task HostSupervisor(string password, int hostPort, int hostFps, CancellationToken token, int generation, bool relayEnabled, string relayAddress, string relayDeviceId)
     {
         try
         {
@@ -204,10 +202,9 @@ internal sealed class MainForm : Form
                     // Announce only after the local host is actually accepting TCP connections.
                     if (relayEnabled && managedTunnel == null)
                     {
-                        if (string.IsNullOrWhiteSpace(relayCredential))
-                            throw new ArgumentException("Informe o token do Relay.");
                         managedTunnel = new RelayTunnelProcess("host", relayAddress, 47900, relayDeviceId,
-                            relayCredential, hostPort, certHash);
+                            hostPort, certHash);
+                        managedTunnel.Message += line => SetStatus("Relay: " + line);
                     }
                     failures = 0;
                     Log($"Listener iniciado em 0.0.0.0:{hostPort}, PID {Environment.ProcessId}, geração {generation}.");

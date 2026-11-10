@@ -1,6 +1,10 @@
 name: Deploy Relay to Hostinger VPS
 
 on:
+  pull_request:
+    paths:
+      - 'relay/**'
+      - '.github/workflows/deploy-relay.yml'
   push:
     branches: [master]
     paths:
@@ -30,6 +34,7 @@ jobs:
           RELAY_TOKEN=validation-token RELAY_CERT_PASSWORD=validation-password docker compose -f relay/docker-compose.yml config --quiet
 
   deploy:
+    if: github.event_name != 'pull_request'
     needs: validate
     runs-on: ubuntu-latest
     environment: production

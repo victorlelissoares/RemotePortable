@@ -7,6 +7,7 @@ RUN dotnet publish -c Release -o /app --no-restore
 FROM mcr.microsoft.com/dotnet/runtime:8.0
 WORKDIR /app
 COPY --from=build /app .
+RUN mkdir -p /data && chown $APP_UID:0 /data
 USER $APP_UID
 EXPOSE 47900
 ENTRYPOINT ["dotnet","RemotePortable.Relay.dll"]

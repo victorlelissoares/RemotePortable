@@ -1,78 +1,43 @@
-# RemotePortable Relay (MVP experimental)
+# RemotePortable Relay
 
-O modo Relay cria um túnel TCP entre duas máquinas por meio de uma VPS. O aplicativo Windows original **não foi modificado**: o túnel encaminha o protocolo TLS já utilizado pelo RemotePortable. Não há descoberta automática de IDs nem integração com a interface nesta versão.
+Relay TLS para encaminhar sessões entre dispositivos sem expor portas locais. A versão atual permite identidade individual por dispositivo e aprovação administrativa.
 
 ## Requisitos
 
-- VPS Linux com Docker e domínio DNS apontando para o IP público.
-- Certificado TLS válido para o domínio, exportado como PKCS#12 (PFX).
-- Porta TCP **47900** acessível na VPS, conforme as regras de rede.
-- .NET 8 SDK para compilar o cliente de túnel no Windows.
-- O mesmo segredo `RELAY_TOKEN` nos dois clientes e no servidor. Trate-o como credencial de infraestrutura, não como senha da sessão.
+- Docker Engine e Docker Compose.
+- Porta TCP 47900 acessível na VPS.
+- Certificado TLS em `relay/certs/relay.pfx`.
+- `RELAY_CERT_PASSWORD` configurada no arquivo `relay/.env`.
 
-## Servidor
+O Compose cria o volume persistente `relay-data` para as listas de dispositivos aprovados e pendentes. A chave privada do Relay e as chaves dos clientes nunca são enviadas ao Tunnel.
 
-Na VPS, dentro da pasta `relay`:
-
-```bash
-cp .env.example .env
-# Edite .env: RELAY_TOKEN com 64 caracteres aleatórios e RELAY_CERT_PASSWORD.
-mkdir -p certs
-# Coloque o certificado válido e chave privada no arquivo certs/relay.pfx
+```sh
+cd relay
 docker compose up -d --build
 docker compose logs -f relay
 ```
 
-Exemplo para exportar um certificado Let's Encrypt já emitido:
+O servidor não exige token para clientes novos. Enquanto computadores com a versão anterior ainda precisarem se conectar, mantenha temporariamente o `RELAY_TOKEN` antigo no `.env`; o Compose o fornece apenas ao processo Relay como compatibilidade. Remova essa variável depois que todos os dispositivos estiverem atualizados e aprovados.
 
-```bash
-openssl pkcs12 -export -out certs/relay.pfx \
-  -inkey /etc/letsencrypt/live/relay.exemplo.com/privkey.pem \
-  -in /etc/letsencrypt/live/relay.exemplo.com/fullchain.pem
+## Aprovar ou revogar dispositivo
+
+O primeiro acesso cria uma entrada pendente. O cliente exibe o ID derivado da chave pública. Confirme a identidade do computador e rode na VPS:
+
+```sh
+docker compose run --rm --no-deps relay approve ID_DO_DISPOSITIVO
+docker compose run --rm --no-deps relay revoke ID_DO_DISPOSITIVO
 ```
 
-Use a senha informada na exportação em `RELAY_CERT_PASSWORD`. Renove o PFX e reinicie o container após renovar o certificado. Não versione `.env`, `.pfx` nem chaves privadas.
+Faça backup do volume `relay-data`; ele contém as chaves públicas autorizadas. A perda desse volume exige aprovar os dispositivos novamente.
 
-## Compilar o túnel (Windows)
+## Atualização
 
-```powershell
-dotnet publish .\relay\RemotePortable.Tunnel\RemotePortable.Tunnel.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o .\relay\publish-tunnel
-```
+Mantenha um backup dos dados e valide o Compose antes de atualizar. A ativação da autenticação nova é compatível com clientes antigos apenas enquanto `RELAY_TOKEN` estiver definido. Não remova o segredo da VPS até concluir a atualização dos clientes. A desativação do protocolo antigo é feita removendo `RELAY_TOKEN` do `.env` e recriando o contêiner.
 
-## Máquina controlada
+## Segurança
 
-1. Abra o RemotePortable original, defina senha forte e clique **Compartilhar** (porta 47890).
-2. Copie o fingerprint TLS apresentado.
-3. Abra um terminal na pasta do executável do túnel:
-
-```powershell
-.\RemotePortable.Tunnel.exe host relay.exemplo.com 47900 computador-01 SEU_RELAY_TOKEN 47890
-```
-
-O túnel mantém uma conexão de saída para o Relay e aguarda um controlador. O ID `computador-01` deve ser único e ter 6–64 caracteres alfanuméricos ou hífens.
-
-## Máquina controladora
-
-Inicie o túnel:
-
-```powershell
-.\RemotePortable.Tunnel.exe join relay.exemplo.com 47900 computador-01 SEU_RELAY_TOKEN 47891
-```
-
-No RemotePortable original, use:
-- IP: `127.0.0.1`
-- Porta: `47891`
-- Senha: a senha definida na máquina controlada
-- Fingerprint TLS: o SHA-256 exibido na máquina controlada
-
-Clique **Controlar**. A máquina controlada deverá aprovar o acesso. O fingerprint muda quando o compartilhamento é reiniciado.
-
-## Segurança e limitações
-
-- O túnel usa TLS com validação do certificado público da VPS; não desabilite essa validação.
-- O RemotePortable mantém uma segunda camada TLS ponta a ponta com verificação manual do fingerprint. O Relay encaminha bytes e não recebe o conteúdo descriptografado da sessão.
-- O token compartilhado concede permissão para registrar e acessar IDs no Relay. **Não exponha o token** nem execute um Relay público sem proteção contra abuso, limites de conexões e observabilidade.
-- MVP: uma sessão por ID, uma conexão por vez; sem cadastro de usuários, controle de acesso por usuário, métricas, limite de banda ou multiplexação.
-- O host re-registra a cada desconexão e a cada 30 minutos sem sessão. O cliente controlador aguarda conexão local.
-- Uma VPS com firewall restritivo ou uma rede corporativa pode bloquear a conexão de saída na porta 47900. Respeite as políticas da rede.
-- O código foi publicado como implementação inicial; é necessário validar build e teste ponta a ponta antes de uso real.
+- Cada comando novo usa desafio aleatório e assinatura ECDSA P-256 por dispositivo.
+- O ID de host corresponde ao ID derivado da chave autenticada; não é um nome arbitrário.
+- O tráfego remoto mantém TLS ponta a ponta e valida o fingerprint anunciado; a senha do host e a aprovação local continuam necessárias.
+- Dispositivos pendentes não conseguem listar, anunciar ou encaminhar conexões.
+- O modo antigo é apenas uma ponte de migração. Evite divulgar o segredo e remova-o ao terminar a atualização.

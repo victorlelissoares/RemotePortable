@@ -9,6 +9,7 @@
   <ItemGroup>
     <Compile Include="../../shared/RelayBridge.cs" Link="RelayBridge.cs" />
     <Compile Include="../../shared/PasswordVault.cs" Link="PasswordVault.cs" />
+    <Compile Include="../../shared/DeviceIdentity.cs" Link="DeviceIdentity.cs" />
     <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" />
     <PackageReference Include="Avalonia" Version="11.3.9" />
     <PackageReference Include="Avalonia.Desktop" Version="11.3.9" />
