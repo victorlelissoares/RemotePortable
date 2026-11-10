@@ -17,7 +17,7 @@ internal static class RelayDirectory
         using var tcp = new TcpClient();
         await tcp.ConnectAsync(relay, port, ct);
         using var tls = new SslStream(tcp.GetStream(), false);
-        await tls.AuthenticateAsClientAsync(relay, ct);
+        await tls.AuthenticateAsClientAsync(new SslClientAuthenticationOptions { TargetHost = relay }, ct);
         await RelayClientAuth.AuthenticateAsync(tls, identity, "LIST", "-", ct);
         var response = await RelayClientAuth.ReadLineAsync(tls, ct);
         if (response.StartsWith("ERR")) throw new IOException("Relay: " + response);
