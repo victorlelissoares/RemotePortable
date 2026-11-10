@@ -1,0 +1,30 @@
+name: Preserve pre-migration stable tag
+on:
+  push:
+    branches: [master]
+    paths:
+      - '.github/workflows/tag-pre-device-auth.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Create immutable pre-migration tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="v0.1.0-pre-device-auth"
+          SHA="9046a6a077ddbf48f4281e90efbd6fce2d39e30c"
+          git cat-file -e "${SHA}^{commit}"
+          if git ls-remote --exit-code --tags origin "refs/tags/${TAG}" >/dev/null 2>&1; then
+            echo "Tag already exists; not moving it"
+            exit 0
+          fi
+          git tag -a "$TAG" "$SHA" -m "Pre device-auth migration snapshot (not independently verified)"
+          git push origin "refs/tags/$TAG"
